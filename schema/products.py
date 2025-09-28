@@ -1,17 +1,21 @@
-import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
-class productSchema(BaseModel):
-    id:str
-    name : str
-    category : str
+
+class ProductSchema(BaseModel):
+    id: int
+    name: str
+    category: str
     unit: str
-    cost_price : float
-    selling_price : float
-    current_stock : int
-    low_stock_alert : Optional[int] = None
+    cost_price: float
+    selling_price: float
+    current_stock: int
+    low_stock_alert: Optional[int] = None
     supplier: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime = datetime.now(timezone.utc)
+    updated_at: datetime = datetime.now(timezone.utc)
 
+    model_config = {
+        "arbitrary_types_allowed": True
+    }

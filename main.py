@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from routes.user import router as user_router
-
+from routes.products import router as product_router
 
 app = FastAPI()
 
 app.include_router(user_router, tags=["Users"])
+app.include_router(product_router, tags=["Products"])
 
 
 @app.get('/')
