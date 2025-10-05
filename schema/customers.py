@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-import datetime
+from datetime import datetime, timezone
 
 class Customer(BaseModel):
     id: str
@@ -8,4 +8,4 @@ class Customer(BaseModel):
     phone:str
     address: Optional[str]
     balance: float=0
-    created_at: datetime
+    created_at: datetime =datetime.now(timezone.utc)

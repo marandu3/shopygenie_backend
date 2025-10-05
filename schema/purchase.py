@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime , timezone
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 
@@ -14,4 +14,4 @@ class Purchase(BaseModel):
     items: List[PurchaseItem]
     total_amount: float
     purchased_by: str
-    created_at: datetime
+    created_at: datetime = datetime.now(timezone.utc)

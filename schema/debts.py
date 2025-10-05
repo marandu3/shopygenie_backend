@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-import datetime
+from datetime import datetime, timezone
 from typing import List
 
 class DebtPayment(BaseModel):
@@ -15,4 +15,4 @@ class Debt(BaseModel):
     cleared:bool=False
     balance:float
     payment: List[DebtPayment]=[]
-    created_at: datetime
+    created_at: datetime = datetime.now(timezone.utc)

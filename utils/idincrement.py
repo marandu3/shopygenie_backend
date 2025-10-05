@@ -1,16 +1,20 @@
-# utils/idincrement.py
+from pymongo.collection import Collection
 
-from database.config import users_collection
-from database.config import products_collection
+def increment_id(collection: Collection, id_field: str = "id") -> str:
+    """
+    Universal increment function for MongoDB collections.
 
-def increment_user_id():
-    max_user = users_collection.find_one(sort=[("id", -1)], projection={"id": 1})
-    if not max_user:
-        return 1
-    return int(max_user["id"]) + 1  # always cast to int
+    Args:
+        collection (Collection): The MongoDB collection to query.
+        id_field (str): The field to increment (default "id").
 
-def increment_product_id():
-    max_user = products_collection.find_one(sort=[("id", -1)], projection={"id": 1})
-    if not max_user:
-        return 1
-    return int(max_user["id"]) + 1  # always cast to int
+    Returns:
+        str: The next ID as a string.
+    """
+    max_doc = collection.find_one(sort=[(id_field, -1)], projection={id_field: 1})
+    if not max_doc or id_field not in max_doc:
+        return "1"  # Start from 1 if empty
+    try:
+        return str(int(max_doc[id_field]) + 1)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid {id_field} value in collection: {max_doc[id_field]}")
