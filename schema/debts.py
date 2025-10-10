@@ -1,18 +1,19 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+from typing import List, Optional
 from datetime import datetime, timezone
-from typing import List
 
 class DebtPayment(BaseModel):
     amount: float
     date: datetime
-    method: str
+    method: str  # e.g., "cash", "transfer"
 
 class Debt(BaseModel):
-    id:str
-    customer_name:str
-    sale_id:str
-    amount:float
-    cleared:bool=False
-    balance:float
-    payment: List[DebtPayment]=[]
+    id: str
+    customer_name: str
+    sale_id: str
+    amount: float
+    balance: float
+    cleared: bool = False
+    payment: List[DebtPayment] = []
     created_at: datetime = datetime.now(timezone.utc)
+    updated_at: Optional[datetime] = None
