@@ -25,13 +25,19 @@ async def create_product(product: ProductSchema):
     return ProductSchema(**product_dict)
 
 
-# Get all products
 @router.get("/products", response_model=List[ProductSchema])
 async def get_all_products():
-    products = list(products_collection.find({}, {"_id": 0}))
+    products_cursor = products_collection.find({}, {"_id": 0})
+    products = []
+    for product in products_cursor:
+        try:
+            products.append(ProductSchema(**product))
+        except Exception:
+            continue  # skip invalid products (optional)
     if not products:
-        raise HTTPException(status_code=404, detail="No products found")
-    return [ProductSchema(**product) for product in products]
+        raise HTTPException(status_code=404, detail="No valid products found")
+    return products
+
 
 
 # Get product by ID
