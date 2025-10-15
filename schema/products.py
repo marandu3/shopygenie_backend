@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class ProductSchema(BaseModel):
-    id: int
+    id: str
     name: str
     category: str
     unit: str
