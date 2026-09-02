@@ -6,24 +6,28 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_tenant_context
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.permissions import SETTINGS_MANAGE
 from app.db.session import get_db
 from app.models.billing import SmsMessage, SmsMessageType
-from app.models.organization import Branch, Organization, Register
+from app.models.organization import Branch, Organization, OrganizationUnit, Register
+from app.models.sale import PaymentMethod
 from app.schemas.common import Page
 from app.schemas.organization import (
     BranchCreate,
     BranchOut,
     OrganizationOut,
     OrganizationSettingsUpdate,
+    OrganizationUnitCreate,
+    OrganizationUnitOut,
     RegisterCreate,
     RegisterOut,
 )
 from app.schemas.sms import SmsConfigOut, SmsConfigUpdate, SmsMessageOut, SmsTestRequest
 from app.services.notifications import send_sms
 from app.services.sms_config import get_sms_config, record_test_result, update_sms_config
-from app.services.usage import enforce_branch_limit
+from app.schemas.usage import OrgLimitsOut, QuotaOut
+from app.services.usage import check_branch_quota, check_worker_quota, enforce_branch_limit, get_plan_config
 
 router = APIRouter(prefix="/organizations", tags=["Organization"])
 
@@ -46,12 +50,74 @@ async def update_my_organization(
     if org is None:
         raise NotFoundError("Organization not found")
 
+    if payload.enabled_payment_methods is not None:
+        valid_codes = {m.value for m in PaymentMethod}
+        unknown = set(payload.enabled_payment_methods) - valid_codes
+        if unknown:
+            raise ValidationAppError(f"Unknown payment method(s): {', '.join(sorted(unknown))}", code="INVALID_PAYMENT_METHOD")
+        if not payload.enabled_payment_methods:
+            raise ValidationAppError("At least one payment method must remain enabled", code="NO_PAYMENT_METHODS")
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(org, field, value)
 
     await db.commit()
     await db.refresh(org)
     return org
+
+
+# ---------- Feature-entitlement limits (MASTER PROMPT §67) ----------
+
+
+@router.get("/me/limits", response_model=OrgLimitsOut)
+async def get_my_limits(ctx: AuthContext = Depends(require_tenant_context), db: AsyncSession = Depends(get_db)):
+    org = await db.get(Organization, ctx.require_organization_id())
+    if org is None:
+        raise NotFoundError("Organization not found")
+    plan = await get_plan_config(db, org)
+    branches = await check_branch_quota(db, org)
+    workers = await check_worker_quota(db, org)
+    return OrgLimitsOut(
+        plan_display_name=plan.display_name if plan else None,
+        branches=QuotaOut(used=branches.used, quota=branches.quota, remaining=branches.remaining, percentage=branches.percentage, exhausted=branches.exhausted, warning=branches.warning),
+        workers=QuotaOut(used=workers.used, quota=workers.quota, remaining=workers.remaining, percentage=workers.percentage, exhausted=workers.exhausted, warning=workers.warning),
+    )
+
+
+# ---------- Units (MASTER PROMPT §69) ----------
+
+
+@router.get("/me/units", response_model=list[OrganizationUnitOut])
+async def list_units(ctx: AuthContext = Depends(require_tenant_context), db: AsyncSession = Depends(get_db)):
+    org_id = ctx.require_organization_id()
+    result = await db.execute(select(OrganizationUnit).where(OrganizationUnit.organization_id == org_id).order_by(OrganizationUnit.name))
+    return list(result.scalars())
+
+
+@router.post("/me/units", response_model=OrganizationUnitOut, status_code=201)
+async def create_unit(
+    payload: OrganizationUnitCreate,
+    ctx: AuthContext = Depends(require_permission(SETTINGS_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    org_id = ctx.require_organization_id()
+    unit = OrganizationUnit(organization_id=org_id, name=payload.name.strip())
+    db.add(unit)
+    await db.commit()
+    await db.refresh(unit)
+    return unit
+
+
+@router.delete("/me/units/{unit_id}", status_code=204)
+async def delete_unit(
+    unit_id: uuid.UUID, ctx: AuthContext = Depends(require_permission(SETTINGS_MANAGE)), db: AsyncSession = Depends(get_db)
+):
+    org_id = ctx.require_organization_id()
+    unit = await db.get(OrganizationUnit, unit_id)
+    if unit is None or unit.organization_id != org_id:
+        raise NotFoundError("Unit not found")
+    await db.delete(unit)
+    await db.commit()
 
 
 @router.post("/me/branches", response_model=BranchOut, status_code=201)

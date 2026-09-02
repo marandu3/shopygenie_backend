@@ -21,3 +21,12 @@ class UsageSummaryOut(BaseModel):
     metrics: list[UsageMetricOut]
     whatsapp: QuotaOut
     storage_bytes: QuotaOut
+
+
+class OrgLimitsOut(BaseModel):
+    """MASTER PROMPT §67 — feature entitlements shown alongside the current
+    plan so a locked action can explain itself instead of just failing."""
+
+    plan_display_name: str | None
+    branches: QuotaOut
+    workers: QuotaOut

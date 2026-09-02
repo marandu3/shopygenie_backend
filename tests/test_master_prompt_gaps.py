@@ -89,6 +89,28 @@ async def test_branch_creation_blocked_once_plan_limit_reached(client, tenant, d
         await db.commit()
 
 
+async def test_org_limits_endpoint_reflects_plan_and_usage(client, tenant, db):
+    from sqlalchemy import select
+
+    from app.models.billing import BillingPlanConfig
+    from app.models.organization import Organization, SubscriptionPlan
+
+    org = await db.get(Organization, tenant.org_id)
+    org.subscription_plan = SubscriptionPlan.BASIC
+    await db.commit()
+
+    plan = (await db.execute(select(BillingPlanConfig).where(BillingPlanConfig.code == SubscriptionPlan.BASIC))).scalar_one()
+
+    token = await login(client, tenant.owner_email, tenant.owner_password)
+    resp = await client.get("/api/v1/organizations/me/limits", headers=auth_headers(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan_display_name"] == plan.display_name
+    assert body["branches"]["used"] == 1  # tenant fixture creates exactly one branch
+    assert body["branches"]["quota"] == plan.max_branches
+    assert body["workers"]["used"] == 2  # tenant fixture creates an owner + a cashier
+
+
 async def test_worker_invite_blocked_once_plan_limit_reached(client, tenant, db):
     from sqlalchemy import select
 
@@ -119,6 +141,38 @@ async def test_worker_invite_blocked_once_plan_limit_reached(client, tenant, db)
     finally:
         plan.max_workers = original
         await db.commit()
+
+
+# ---------- Configurable units & payment methods (MASTER PROMPT §69) ----------
+
+async def test_org_can_manage_custom_units(client, tenant):
+    token = await login(client, tenant.owner_email, tenant.owner_password)
+
+    created = await client.post("/api/v1/organizations/me/units", headers=auth_headers(token), json={"name": "Crate"})
+    assert created.status_code == 201
+    unit_id = created.json()["id"]
+
+    listed = await client.get("/api/v1/organizations/me/units", headers=auth_headers(token))
+    assert any(u["name"] == "Crate" for u in listed.json())
+
+    deleted = await client.delete(f"/api/v1/organizations/me/units/{unit_id}", headers=auth_headers(token))
+    assert deleted.status_code == 204
+
+
+async def test_enabled_payment_methods_validated_and_saved(client, tenant):
+    token = await login(client, tenant.owner_email, tenant.owner_password)
+
+    bad = await client.put("/api/v1/organizations/me", headers=auth_headers(token), json={"enabled_payment_methods": ["BITCOIN"]})
+    assert bad.status_code == 422
+    assert bad.json()["error"]["code"] == "INVALID_PAYMENT_METHOD"
+
+    empty = await client.put("/api/v1/organizations/me", headers=auth_headers(token), json={"enabled_payment_methods": []})
+    assert empty.status_code == 422
+    assert empty.json()["error"]["code"] == "NO_PAYMENT_METHODS"
+
+    ok = await client.put("/api/v1/organizations/me", headers=auth_headers(token), json={"enabled_payment_methods": ["CASH", "MOBILE_MONEY"]})
+    assert ok.status_code == 200
+    assert ok.json()["enabled_payment_methods"] == ["CASH", "MOBILE_MONEY"]
 
 
 # ---------- Custom roles (MASTER PROMPT §42, §88) ----------

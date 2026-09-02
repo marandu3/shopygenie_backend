@@ -105,6 +105,28 @@ async def check_storage_quota(db: AsyncSession, organization: Organization) -> Q
     return _evaluate_quota(used, quota_bytes)
 
 
+async def check_branch_quota(db: AsyncSession, organization: Organization) -> QuotaCheck:
+    """MASTER PROMPT §67: features stay visible with an explanation and an
+    upgrade path, rather than just failing when the limit is hit."""
+    plan = await get_plan_config(db, organization)
+    quota = plan.max_branches if plan else None
+    count = (await db.execute(select(func.count()).select_from(Branch).where(Branch.organization_id == organization.id))).scalar_one()
+    return _evaluate_quota(count, quota)
+
+
+async def check_worker_quota(db: AsyncSession, organization: Organization) -> QuotaCheck:
+    plan = await get_plan_config(db, organization)
+    quota = plan.max_workers if plan else None
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.organization_id == organization.id, User.status.in_([WorkerStatus.ACTIVE, WorkerStatus.INVITED]))
+        )
+    ).scalar_one()
+    return _evaluate_quota(count, quota)
+
+
 async def enforce_whatsapp_quota(db: AsyncSession, organization: Organization) -> None:
     """Hard-block per MASTER PROMPT §66 — never silently fail."""
     check = await check_whatsapp_quota(db, organization)
@@ -128,13 +150,12 @@ async def enforce_branch_limit(db: AsyncSession, organization: Organization) -> 
     """Feature entitlement, not a usage meter (MASTER PROMPT §62, §67) — the
     plan's max_branches is a hard ceiling on how many branches can exist at
     once, checked before creating one more."""
-    plan = await get_plan_config(db, organization)
-    if plan is None or plan.max_branches is None:
-        return
-    count = (await db.execute(select(func.count()).select_from(Branch).where(Branch.organization_id == organization.id))).scalar_one()
-    if count >= plan.max_branches:
+    check = await check_branch_quota(db, organization)
+    if check.exhausted:
+        plan = await get_plan_config(db, organization)
+        plan_name = plan.display_name if plan else "your current"
         raise ValidationAppError(
-            f"Your {plan.display_name} plan allows up to {plan.max_branches} branch(es). Upgrade your plan to add more.",
+            f"Your {plan_name} plan allows up to {check.quota} branch(es). Upgrade your plan to add more.",
             code="BRANCH_LIMIT_REACHED",
         )
 
@@ -143,21 +164,11 @@ async def enforce_worker_limit(db: AsyncSession, organization: Organization) -> 
     """Feature entitlement (MASTER PROMPT §62, §67) — active/invited workers
     count against the plan's max_workers ceiling; suspended/disabled ones
     don't, so removing access frees a seat."""
-    plan = await get_plan_config(db, organization)
-    if plan is None or plan.max_workers is None:
-        return
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(User)
-            .where(
-                User.organization_id == organization.id,
-                User.status.in_([WorkerStatus.ACTIVE, WorkerStatus.INVITED]),
-            )
-        )
-    ).scalar_one()
-    if count >= plan.max_workers:
+    check = await check_worker_quota(db, organization)
+    if check.exhausted:
+        plan = await get_plan_config(db, organization)
+        plan_name = plan.display_name if plan else "your current"
         raise ValidationAppError(
-            f"Your {plan.display_name} plan allows up to {plan.max_workers} worker(s). Upgrade your plan to invite more.",
+            f"Your {plan_name} plan allows up to {check.quota} worker(s). Upgrade your plan to invite more.",
             code="WORKER_LIMIT_REACHED",
         )

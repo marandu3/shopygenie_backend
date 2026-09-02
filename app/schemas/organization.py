@@ -42,6 +42,7 @@ class OrganizationOut(ORMModel):
     tax_inclusive_pricing: bool
     low_stock_default_threshold: int
     discount_auto_approve_threshold_percent: float | None = None
+    enabled_payment_methods: list[str] | None = None
     subscription_status: str
     subscription_plan: str | None = None
     subscription_expires_at: datetime | None = None
@@ -57,3 +58,13 @@ class OrganizationSettingsUpdate(BaseModel):
     tax_inclusive_pricing: bool | None = None
     low_stock_default_threshold: int | None = Field(default=None, ge=0)
     discount_auto_approve_threshold_percent: float | None = Field(default=None, ge=0, le=100)
+    enabled_payment_methods: list[str] | None = None
+
+
+class OrganizationUnitCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+
+
+class OrganizationUnitOut(ORMModel):
+    id: uuid.UUID
+    name: str

@@ -8,7 +8,7 @@ from app.models.expense import Expense, ExpenseCategory
 from app.models.held_sale import HeldSale, HeldSaleItem
 from app.models.inventory import InventoryCostLayer, InventoryMovement
 from app.models.notification import Notification, NotificationRead
-from app.models.organization import Branch, Organization, Register
+from app.models.organization import Branch, Organization, OrganizationUnit, Register
 from app.models.platform_owner_invitation import PlatformOwnerInvitation
 from app.models.product import Category, Product
 from app.models.purchase import Purchase, PurchaseItem
@@ -40,6 +40,7 @@ __all__ = [
     "NotificationRead",
     "Branch",
     "Organization",
+    "OrganizationUnit",
     "Register",
     "PlatformOwnerInvitation",
     "Category",

@@ -2,11 +2,11 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Uuid
+from sqlalchemy import ARRAY, DateTime, Enum, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.mixins import TimestampMixin, UUIDPKMixin
+from app.models.mixins import TenantScopedMixin, TimestampMixin, UUIDPKMixin
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -74,7 +74,22 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
     sms_last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sms_last_test_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Null/empty = every built-in PaymentMethod is enabled — preserves prior
+    # behavior for tenants that never configure this (MASTER PROMPT §69).
+    enabled_payment_methods: Mapped[list[str] | None] = mapped_column(ARRAY(String(20)), nullable=True)
+
     branches: Mapped[list["Branch"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+
+
+class OrganizationUnit(UUIDPKMixin, TenantScopedMixin, Base):
+    """A tenant-defined unit of measure beyond the standard list shown in the
+    UI (piece/kg/gram/litre/metre/box/packet/dozen) — MASTER PROMPT §69.
+    Product.unit itself stays a free-text field for backward compatibility;
+    this table is purely a curated suggestion list for the product form."""
+
+    __tablename__ = "organization_units"
+
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
 class Branch(UUIDPKMixin, TimestampMixin, Base):
