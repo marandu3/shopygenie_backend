@@ -21,6 +21,8 @@ from app.schemas.report import (
     TimeSeriesReport,
     TimeSeriesRequest,
 )
+from app.schemas.report_builder import ReportBuilderRequest, ReportBuilderResult
+from app.services.report_builder import build_report
 from app.services.reports import (
     build_business_summary,
     build_comparison_report,
@@ -35,6 +37,19 @@ from app.services.reports import (
 )
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+
+@router.post("/builder", response_model=ReportBuilderResult)
+async def report_builder_endpoint(
+    payload: ReportBuilderRequest,
+    ctx: AuthContext = Depends(require_permission(REPORTS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Configurable ad-hoc reporting: pick a metric, an optional grouping
+    dimension, a date range and filters (MASTER PROMPT §58). Not a saved-
+    report/dashboard system yet — one query in, one result out."""
+    org_id = ctx.require_organization_id()
+    return await build_report(db, organization_id=org_id, request=payload)
 
 
 @router.post("/summary", response_model=BusinessSummaryReport)
