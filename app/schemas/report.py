@@ -118,3 +118,68 @@ class DebtAgingReport(BaseModel):
     buckets: list[DebtAgingBucket] = []
     total_outstanding: float = 0
     generated_at: datetime
+
+
+class ComparisonRequest(BaseModel):
+    start_date: datetime
+    end_date: datetime
+
+
+class ComparisonMetric(BaseModel):
+    label: str
+    current: float
+    previous: float
+    # Deliberately nullable: a percent change against a zero baseline is
+    # meaningless/misleading (MASTER PROMPT §48) — omit it, don't show "+inf%".
+    change_percent: float | None = None
+
+
+class ComparisonReport(BaseModel):
+    current_start: datetime
+    current_end: datetime
+    previous_start: datetime
+    previous_end: datetime
+    metrics: list[ComparisonMetric]
+    generated_at: datetime
+
+
+class TimeSeriesRequest(BaseModel):
+    start_date: datetime
+    end_date: datetime
+    metric: str = "revenue"  # revenue | transactions | profit
+
+
+class TimeSeriesPoint(BaseModel):
+    date: str
+    value: float
+
+
+class TimeSeriesReport(BaseModel):
+    metric: str
+    points: list[TimeSeriesPoint]
+    generated_at: datetime
+
+
+class HeatmapCell(BaseModel):
+    day_of_week: int  # 0=Monday .. 6=Sunday
+    hour: int  # 0-23
+    revenue: float
+    transactions: int
+
+
+class HeatmapReport(BaseModel):
+    cells: list[HeatmapCell]
+    generated_at: datetime
+
+
+class ParetoLine(BaseModel):
+    product_id: uuid.UUID
+    product_name: str
+    revenue: float
+    cumulative_percent: float
+    in_top_80_percent: bool
+
+
+class ParetoReport(BaseModel):
+    lines: list[ParetoLine]
+    generated_at: datetime

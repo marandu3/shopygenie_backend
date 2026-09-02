@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -15,17 +15,25 @@ from app.models.sale import Payment, Sale, SaleItem, SaleStatus
 from app.models.supplier import Supplier
 from app.schemas.report import (
     BusinessSummaryReport,
+    ComparisonMetric,
+    ComparisonReport,
     CustomerReport,
     CustomerSpend,
     DebtAgingBucket,
     DebtAgingReport,
+    HeatmapCell,
+    HeatmapReport,
     InventoryReport,
+    ParetoLine,
+    ParetoReport,
     PaymentMethodTotal,
     ProductMovementSummary,
     ReportFilters,
     SalesReport,
     SupplierPurchaseSummary,
     SupplierReport,
+    TimeSeriesPoint,
+    TimeSeriesReport,
 )
 from app.services.money import money
 
@@ -372,3 +380,155 @@ async def build_debt_aging_report(db: AsyncSession, *, organization_id: uuid.UUI
     total_outstanding = money(sum((amount for _, amount in buckets.values()), Decimal("0")))
 
     return DebtAgingReport(buckets=bucket_list, total_outstanding=float(total_outstanding), generated_at=datetime.now(timezone.utc))
+
+
+async def _period_metrics(db: AsyncSession, *, organization_id: uuid.UUID, start: datetime, end: datetime) -> dict:
+    conditions = [Sale.organization_id == organization_id, Sale.status == SaleStatus.COMPLETED, Sale.created_at >= start, Sale.created_at <= end]
+
+    revenue_row = (
+        await db.execute(select(func.coalesce(func.sum(Sale.total_amount), 0), func.count(Sale.id)).where(*conditions))
+    ).one()
+    revenue = money(revenue_row[0])
+    transactions = int(revenue_row[1])
+
+    cogs = money(
+        (
+            await db.execute(
+                select(func.coalesce(func.sum(SaleItem.unit_cost_price * SaleItem.quantity), 0))
+                .select_from(SaleItem)
+                .join(Sale, Sale.id == SaleItem.sale_id)
+                .where(*conditions)
+            )
+        ).scalar_one()
+    )
+
+    return {"revenue": revenue, "gross_profit": money(revenue - cogs), "transactions": Decimal(transactions)}
+
+
+def _change_percent(current: Decimal, previous: Decimal) -> float | None:
+    if previous == 0:
+        return None  # never fabricate a percentage against a zero baseline (§48)
+    return float(money((current - previous) / previous * 100))
+
+
+async def build_comparison_report(
+    db: AsyncSession, *, organization_id: uuid.UUID, current_start: datetime, current_end: datetime
+) -> ComparisonReport:
+    """Current period vs the immediately-preceding period of equal length —
+    covers "today vs yesterday", "this week vs last week", etc. uniformly:
+    the caller just resolves whichever preset to concrete dates."""
+    duration = current_end - current_start
+    previous_end = current_start - timedelta(microseconds=1)
+    previous_start = previous_end - duration
+
+    current = await _period_metrics(db, organization_id=organization_id, start=current_start, end=current_end)
+    previous = await _period_metrics(db, organization_id=organization_id, start=previous_start, end=previous_end)
+
+    metrics = [
+        ComparisonMetric(
+            label=key,
+            current=float(current[key]),
+            previous=float(previous[key]),
+            change_percent=_change_percent(current[key], previous[key]),
+        )
+        for key in ("revenue", "gross_profit", "transactions")
+    ]
+
+    return ComparisonReport(
+        current_start=current_start, current_end=current_end,
+        previous_start=previous_start, previous_end=previous_end,
+        metrics=metrics, generated_at=datetime.now(timezone.utc),
+    )
+
+
+async def build_timeseries_report(
+    db: AsyncSession, *, organization_id: uuid.UUID, start: datetime, end: datetime, metric: str
+) -> TimeSeriesReport:
+    """Daily-bucketed series with gaps filled to 0 — a missing day must read
+    as "no activity", never be silently omitted as if that day didn't exist
+    (MASTER PROMPT §50)."""
+    conditions = [Sale.organization_id == organization_id, Sale.status == SaleStatus.COMPLETED, Sale.created_at >= start, Sale.created_at <= end]
+
+    if metric == "transactions":
+        value_expr = func.count(Sale.id)
+    else:
+        value_expr = func.coalesce(func.sum(Sale.total_amount), 0)
+
+    rows = await db.execute(
+        select(func.date(Sale.created_at).label("day"), value_expr.label("value")).where(*conditions).group_by("day")
+    )
+    by_day: dict[str, float] = {str(row.day): float(row.value) for row in rows.all()}
+
+    points: list[TimeSeriesPoint] = []
+    cursor = start.date()
+    end_date = end.date()
+    while cursor <= end_date:
+        key = cursor.isoformat()
+        points.append(TimeSeriesPoint(date=key, value=by_day.get(key, 0.0)))
+        cursor += timedelta(days=1)
+
+    return TimeSeriesReport(metric=metric, points=points, generated_at=datetime.now(timezone.utc))
+
+
+async def build_heatmap_report(
+    db: AsyncSession, *, organization_id: uuid.UUID, start: datetime | None, end: datetime | None
+) -> HeatmapReport:
+    """Sales volume by day-of-week x hour — identifies peak operating
+    periods (MASTER PROMPT §55). ISODOW is 1=Monday..7=Sunday; converted to
+    0-indexed Monday for a friendlier frontend grid."""
+    conditions = [Sale.organization_id == organization_id, Sale.status == SaleStatus.COMPLETED]
+    if start:
+        conditions.append(Sale.created_at >= start)
+    if end:
+        conditions.append(Sale.created_at <= end)
+
+    dow_expr = func.extract("isodow", Sale.created_at)
+    hour_expr = func.extract("hour", Sale.created_at)
+
+    rows = await db.execute(
+        select(dow_expr.label("dow"), hour_expr.label("hour"), func.sum(Sale.total_amount), func.count(Sale.id))
+        .where(*conditions)
+        .group_by("dow", "hour")
+    )
+
+    cells = [
+        HeatmapCell(day_of_week=int(row.dow) - 1, hour=int(row.hour), revenue=float(money(row[2])), transactions=int(row[3]))
+        for row in rows.all()
+    ]
+
+    return HeatmapReport(cells=cells, generated_at=datetime.now(timezone.utc))
+
+
+async def build_pareto_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> ParetoReport:
+    """Which products make up ~80% of revenue (MASTER PROMPT §56)."""
+    sale_conditions = _sale_conditions(organization_id, filters)
+
+    rows = await db.execute(
+        select(SaleItem.product_id, SaleItem.product_name, func.sum(SaleItem.line_total))
+        .select_from(SaleItem)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(*sale_conditions)
+        .group_by(SaleItem.product_id, SaleItem.product_name)
+        .order_by(func.sum(SaleItem.line_total).desc())
+    )
+    product_rows = rows.all()
+
+    total_revenue = sum((money(row[2]) for row in product_rows), Decimal("0"))
+    lines: list[ParetoLine] = []
+    running_total = Decimal("0")
+
+    for product_id, product_name, revenue in product_rows:
+        revenue = money(revenue)
+        running_total += revenue
+        cumulative_percent = float(money((running_total / total_revenue * 100))) if total_revenue > 0 else 0.0
+        lines.append(
+            ParetoLine(
+                product_id=product_id,
+                product_name=product_name,
+                revenue=float(revenue),
+                cumulative_percent=cumulative_percent,
+                in_top_80_percent=cumulative_percent <= 80.0,
+            )
+        )
+
+    return ParetoReport(lines=lines, generated_at=datetime.now(timezone.utc))
