@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     smsgate_api_key: str = ""
     smsgate_sender_id: str = ""
 
+    uploads_dir: str = "uploads"
+    max_upload_bytes: int = 5 * 1024 * 1024
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

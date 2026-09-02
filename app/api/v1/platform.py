@@ -8,9 +8,16 @@ from app.api.deps import AuthContext, PaginationParams, require_platform_owner
 from app.core.exceptions import NotFoundError
 from app.core.security import create_access_token
 from app.db.session import get_db
+from app.models.account_request import AccountRequestStatus
 from app.models.billing import ActivationRequestStatus
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.account_request import (
+    AccountRequestApprove,
+    AccountRequestReject,
+    AccountRequestReview,
+    TenantAccountRequestOut,
+)
 from app.schemas.billing import ActivationRequestAdminOut, ActivationRequestApprove, ActivationRequestReject
 from app.schemas.common import Page
 from app.schemas.platform import (
@@ -19,11 +26,17 @@ from app.schemas.platform import (
     OrganizationProvision,
     PlatformKPIs,
 )
+from app.services.account_requests import (
+    approve_account_request,
+    reject_account_request,
+    set_under_review,
+)
 from app.services.audit import log_action
 from app.services.billing import approve_activation_request, platform_list_activation_requests, reject_activation_request
 from app.services.notifications import send_sms
 from app.services.platform import platform_kpis, provision_organization, set_organization_active
 from app.services.workers import build_invitation_sms
+from app.models.account_request import TenantAccountRequest
 
 router = APIRouter(prefix="/platform", tags=["Platform"])
 
@@ -188,3 +201,61 @@ async def reject_activation_request_endpoint(
     await db.commit()
     await db.refresh(request)
     return _to_admin_out(request, org.name if org else "")
+
+
+# ---------- Tenant account requests (MASTER PROMPT §7) ----------
+
+@router.get("/account-requests", response_model=Page[TenantAccountRequestOut])
+async def list_account_requests(
+    status: AccountRequestStatus | None = None,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+    pagination: PaginationParams = Depends(),
+):
+    conditions = [TenantAccountRequest.status == status] if status else []
+    total = (await db.execute(select(func.count()).select_from(TenantAccountRequest).where(*conditions))).scalar_one()
+    result = await db.execute(
+        select(TenantAccountRequest).where(*conditions).order_by(TenantAccountRequest.created_at.desc())
+        .offset(pagination.offset).limit(pagination.limit)
+    )
+    items = list(result.scalars())
+    return Page(items=items, total=total, page=pagination.page, page_size=pagination.page_size)
+
+
+@router.post("/account-requests/{request_id}/review", response_model=TenantAccountRequestOut)
+async def review_account_request_endpoint(
+    request_id: uuid.UUID, payload: AccountRequestReview, ctx: AuthContext = Depends(require_platform_owner), db: AsyncSession = Depends(get_db)
+):
+    request = await set_under_review(db, request_id=request_id, actor_id=ctx.user_id, note=payload.note)
+    await db.commit()
+    return request
+
+
+@router.post("/account-requests/{request_id}/reject", response_model=TenantAccountRequestOut)
+async def reject_account_request_endpoint(
+    request_id: uuid.UUID, payload: AccountRequestReject, ctx: AuthContext = Depends(require_platform_owner), db: AsyncSession = Depends(get_db)
+):
+    request = await reject_account_request(db, request_id=request_id, actor_id=ctx.user_id, note=payload.note)
+    await db.commit()
+    return request
+
+
+@router.post("/account-requests/{request_id}/approve", response_model=TenantAccountRequestOut)
+async def approve_account_request_endpoint(
+    request_id: uuid.UUID,
+    payload: AccountRequestApprove,
+    background_tasks: BackgroundTasks,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    request, org, owner, temporary_password = await approve_account_request(db, request_id=request_id, actor_id=ctx.user_id, payload=payload)
+    await db.commit()
+    await db.refresh(request)
+
+    if owner.phone:
+        message = build_invitation_sms(
+            business_name=org.name, worker_name=owner.full_name, email=owner.email, temporary_password=temporary_password
+        )
+        background_tasks.add_task(send_sms, to=owner.phone, message=message)
+
+    return request

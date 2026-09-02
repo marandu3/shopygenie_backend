@@ -39,4 +39,5 @@ class ExpenseOut(ORMModel):
     category_id: uuid.UUID | None
     recorded_by: uuid.UUID
     is_approved: bool
+    evidence_filename: str | None = None
     created_at: datetime

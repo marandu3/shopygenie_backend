@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,16 @@ def generate_temporary_password(length: int = 10) -> str:
     """Human-typeable temporary password for worker invitations."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def generate_secure_token() -> str:
+    """A high-entropy, URL-safe token for one-time invitation links. Only
+    its hash (see hash_token) is ever persisted."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _create_token(

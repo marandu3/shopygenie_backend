@@ -13,6 +13,7 @@ from app.models.organization import Organization
 from app.models.user import Role, RolePermission, User, WorkerStatus
 from app.schemas.user import RoleOut, WorkerInvite, WorkerOut, WorkerUpdate
 from app.services.notifications import send_sms
+from app.services.usage import increment_usage
 from app.services.workers import build_invitation_sms, invite_worker, set_worker_status
 
 router = APIRouter(prefix="/workers", tags=["Workers"])
@@ -54,6 +55,10 @@ async def invite_worker_endpoint(
         )
         # Fire-and-forget: never make the invite request wait on SMS delivery (MASTER PROMPT §41).
         background_tasks.add_task(send_sms, to=worker.phone, message=message)
+        # SMS stays unlimited while the subscription is active but is still
+        # counted for transparency (MASTER PROMPT §63).
+        await increment_usage(db, organization_id=org_id, metric="sms_messages")
+        await db.commit()
 
     return worker
 

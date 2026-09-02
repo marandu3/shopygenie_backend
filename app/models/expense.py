@@ -35,3 +35,8 @@ class Expense(UUIDPKMixin, TenantScopedMixin, TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     expense_date: Mapped[date] = mapped_column(Date, nullable=False)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Path on disk (tenant/expense-isolated) of an uploaded receipt/photo —
+    # never a public URL; served back through an auth-checked endpoint.
+    evidence_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    evidence_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

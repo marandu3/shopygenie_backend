@@ -10,9 +10,24 @@ from app.models.billing import ActivationRequest
 from app.models.organization import Organization
 from app.schemas.billing import ActivationRequestCreate, ActivationRequestOut, SubscriptionStatusOut
 from app.schemas.common import Page
+from app.schemas.usage import UsageMetricOut, UsageSummaryOut
 from app.services.billing import submit_activation_request
+from app.services.usage import current_period, get_usage_summary
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
+
+
+@router.get("/usage", response_model=UsageSummaryOut)
+async def get_usage_endpoint(
+    ctx: AuthContext = Depends(require_permission(BILLING_VIEW)), db: AsyncSession = Depends(get_db)
+):
+    org_id = ctx.require_organization_id()
+    period = current_period()
+    counters = await get_usage_summary(db, organization_id=org_id, period=period)
+    return UsageSummaryOut(
+        period=period,
+        metrics=[UsageMetricOut(metric=c.metric, period=c.period, count=c.count) for c in counters],
+    )
 
 
 @router.get("/status", response_model=SubscriptionStatusOut)
