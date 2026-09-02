@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import AuthContext, PaginationParams, require_permission
 from app.core.exceptions import NotFoundError
-from app.core.permissions import PURCHASES_CREATE, PURCHASES_RETURN, PURCHASES_VIEW
+from app.core.permissions import PURCHASES_CREATE, PURCHASES_RETURN, PURCHASES_VIEW, PURCHASES_VOID
 from app.db.session import get_db
 from app.models.purchase import Purchase
 from app.schemas.common import Page
@@ -92,7 +92,7 @@ async def void_purchase_endpoint(
     purchase_id: uuid.UUID,
     payload: VoidPurchaseRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission(PURCHASES_CREATE)),
+    ctx: AuthContext = Depends(require_permission(PURCHASES_VOID)),
     db: AsyncSession = Depends(get_db),
 ):
     org_id = ctx.require_organization_id()

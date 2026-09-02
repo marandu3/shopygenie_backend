@@ -23,6 +23,7 @@ from app.schemas.organization import (
 from app.schemas.sms import SmsConfigOut, SmsConfigUpdate, SmsMessageOut, SmsTestRequest
 from app.services.notifications import send_sms
 from app.services.sms_config import get_sms_config, record_test_result, update_sms_config
+from app.services.usage import enforce_branch_limit
 
 router = APIRouter(prefix="/organizations", tags=["Organization"])
 
@@ -60,6 +61,11 @@ async def create_branch(
     db: AsyncSession = Depends(get_db),
 ):
     org_id = ctx.require_organization_id()
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise NotFoundError("Organization not found")
+    await enforce_branch_limit(db, org)
+
     branch = Branch(organization_id=org_id, **payload.model_dump())
     db.add(branch)
     await db.commit()

@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ValidationAppError
 from app.models.billing import BillingPlanConfig
 from app.models.expense import Expense
-from app.models.organization import Organization
+from app.models.organization import Branch, Organization
 from app.models.usage import UsageCounter
+from app.models.user import User, WorkerStatus
 
 WHATSAPP_METRIC = "whatsapp_messages"
 SMS_METRIC = "sms_messages"
@@ -120,4 +121,43 @@ async def enforce_storage_quota(db: AsyncSession, organization: Organization, *,
         raise ValidationAppError(
             "This upload would exceed your organization's storage quota. Upgrade your plan or remove old evidence files.",
             code="STORAGE_QUOTA_EXHAUSTED",
+        )
+
+
+async def enforce_branch_limit(db: AsyncSession, organization: Organization) -> None:
+    """Feature entitlement, not a usage meter (MASTER PROMPT §62, §67) — the
+    plan's max_branches is a hard ceiling on how many branches can exist at
+    once, checked before creating one more."""
+    plan = await get_plan_config(db, organization)
+    if plan is None or plan.max_branches is None:
+        return
+    count = (await db.execute(select(func.count()).select_from(Branch).where(Branch.organization_id == organization.id))).scalar_one()
+    if count >= plan.max_branches:
+        raise ValidationAppError(
+            f"Your {plan.display_name} plan allows up to {plan.max_branches} branch(es). Upgrade your plan to add more.",
+            code="BRANCH_LIMIT_REACHED",
+        )
+
+
+async def enforce_worker_limit(db: AsyncSession, organization: Organization) -> None:
+    """Feature entitlement (MASTER PROMPT §62, §67) — active/invited workers
+    count against the plan's max_workers ceiling; suspended/disabled ones
+    don't, so removing access frees a seat."""
+    plan = await get_plan_config(db, organization)
+    if plan is None or plan.max_workers is None:
+        return
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.organization_id == organization.id,
+                User.status.in_([WorkerStatus.ACTIVE, WorkerStatus.INVITED]),
+            )
+        )
+    ).scalar_one()
+    if count >= plan.max_workers:
+        raise ValidationAppError(
+            f"Your {plan.display_name} plan allows up to {plan.max_workers} worker(s). Upgrade your plan to invite more.",
+            code="WORKER_LIMIT_REACHED",
         )

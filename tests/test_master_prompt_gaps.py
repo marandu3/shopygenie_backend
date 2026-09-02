@@ -1,9 +1,124 @@
 """Coverage for the gaps identified in a full re-audit against the 124-
 section MASTER PROMPT: per-tenant SMSGate config, custom roles, sale/debt
 SMS notifications, billing plan configurability, WhatsApp/storage quotas,
-platform-level report builder, and sales-power analytics."""
+platform-level report builder, sales-power analytics, purchase-void
+authorization, and branch/worker plan entitlement limits."""
 
 from tests.conftest import auth_headers, login
+
+
+# ---------- Purchase void authorization (MASTER PROMPT §40, §88 named bug) ----------
+
+async def test_worker_who_can_create_purchases_cannot_void_them(client, tenant, db):
+    """Previously voiding reused PURCHASES_CREATE — any purchasing worker
+    could void any purchase with no separate authorization. Inventory
+    Manager has PURCHASES_CREATE but must not have PURCHASES_VOID."""
+    import uuid as uuid_lib
+
+    from sqlalchemy import select
+
+    from app.core.security import hash_password
+    from app.models.user import Role, User, WorkerStatus
+
+    result = await db.execute(select(Role).where(Role.organization_id.is_(None), Role.name == "Inventory Manager"))
+    inv_role = result.scalar_one()
+
+    suffix = uuid_lib.uuid4().hex[:8]
+    password = "InvManagerPass123!"
+    worker = User(
+        organization_id=tenant.org_id, role_id=inv_role.id,
+        full_name="Inventory Manager", email=f"invmgr-{suffix}@shopygenie-tests.dev",
+        hashed_password=hash_password(password), status=WorkerStatus.ACTIVE, must_change_password=False,
+    )
+    db.add(worker)
+    await db.commit()
+
+    owner_token = await login(client, tenant.owner_email, tenant.owner_password)
+    purchase = await client.post(
+        "/api/v1/purchases",
+        headers=auth_headers(owner_token),
+        json={"items": [{"product_id": str(tenant.product_id), "quantity": 5, "unit_cost_price": 100}]},
+    )
+    assert purchase.status_code == 201, purchase.text
+    purchase_id = purchase.json()["id"]
+
+    inv_token = await login(client, worker.email, password)
+
+    can_create = await client.post(
+        "/api/v1/purchases",
+        headers=auth_headers(inv_token),
+        json={"items": [{"product_id": str(tenant.product_id), "quantity": 2, "unit_cost_price": 100}]},
+    )
+    assert can_create.status_code == 201
+
+    cannot_void = await client.post(
+        f"/api/v1/purchases/{purchase_id}/void", headers=auth_headers(inv_token), json={"reason": "test"}
+    )
+    assert cannot_void.status_code == 403
+
+    can_void = await client.post(
+        f"/api/v1/purchases/{purchase_id}/void", headers=auth_headers(owner_token), json={"reason": "Owner-authorized void"}
+    )
+    assert can_void.status_code == 200
+
+
+# ---------- Branch / worker plan entitlement limits (MASTER PROMPT §62, §67) ----------
+
+async def test_branch_creation_blocked_once_plan_limit_reached(client, tenant, db):
+    from sqlalchemy import select
+
+    from app.models.billing import BillingPlanConfig
+    from app.models.organization import Organization, SubscriptionPlan
+
+    org = await db.get(Organization, tenant.org_id)
+    org.subscription_plan = SubscriptionPlan.BASIC
+    await db.flush()
+
+    plan = (await db.execute(select(BillingPlanConfig).where(BillingPlanConfig.code == SubscriptionPlan.BASIC))).scalar_one()
+    original = plan.max_branches
+    plan.max_branches = 1  # tenant fixture already creates exactly one branch
+    await db.commit()
+
+    token = await login(client, tenant.owner_email, tenant.owner_password)
+    try:
+        resp = await client.post("/api/v1/organizations/me/branches", headers=auth_headers(token), json={"name": "Second Branch"})
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "BRANCH_LIMIT_REACHED"
+    finally:
+        plan.max_branches = original
+        await db.commit()
+
+
+async def test_worker_invite_blocked_once_plan_limit_reached(client, tenant, db):
+    from sqlalchemy import select
+
+    from app.models.billing import BillingPlanConfig
+    from app.models.organization import Organization, SubscriptionPlan
+
+    org = await db.get(Organization, tenant.org_id)
+    org.subscription_plan = SubscriptionPlan.BASIC
+    await db.flush()
+
+    plan = (await db.execute(select(BillingPlanConfig).where(BillingPlanConfig.code == SubscriptionPlan.BASIC))).scalar_one()
+    original = plan.max_workers
+    plan.max_workers = 2  # tenant fixture already creates an owner + a cashier
+    await db.commit()
+
+    token = await login(client, tenant.owner_email, tenant.owner_password)
+    roles = await client.get("/api/v1/workers/roles", headers=auth_headers(token))
+    cashier_role_id = next(r["id"] for r in roles.json() if r["name"] == "Cashier")
+
+    try:
+        resp = await client.post(
+            "/api/v1/workers",
+            headers=auth_headers(token),
+            json={"full_name": "One Too Many", "email": "onetoomany@shopygenie-tests.dev", "role_id": cashier_role_id},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "WORKER_LIMIT_REACHED"
+    finally:
+        plan.max_workers = original
+        await db.commit()
 
 
 # ---------- Custom roles (MASTER PROMPT §42, §88) ----------

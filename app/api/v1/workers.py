@@ -22,6 +22,7 @@ from app.services.workers import (
     set_worker_status,
     update_custom_role,
 )
+from app.services.usage import enforce_worker_limit
 
 router = APIRouter(prefix="/workers", tags=["Workers"])
 
@@ -91,6 +92,9 @@ async def invite_worker_endpoint(
 ):
     org_id = ctx.require_organization_id()
     org = await db.get(Organization, org_id)
+    if org is None:
+        raise NotFoundError("Organization not found")
+    await enforce_worker_limit(db, org)
 
     worker, temporary_password = await invite_worker(db, organization_id=org_id, invited_by=ctx.user_id, payload=payload)
     await db.commit()
