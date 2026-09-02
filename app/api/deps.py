@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import Depends, Request
+from fastapi import Depends, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,3 +138,20 @@ async def require_tenant_context(ctx: AuthContext = Depends(require_password_alr
     """Use on every tenant-scoped route: guarantees ctx.organization_id is set."""
     ctx.require_organization_id()
     return ctx
+
+
+class PaginationParams:
+    """Server-side pagination (MASTER PROMPT §64) — never let a list endpoint
+    hand the whole table to the browser. page is 1-indexed."""
+
+    def __init__(self, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200)):
+        self.page = page
+        self.page_size = page_size
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.page_size
+
+    @property
+    def limit(self) -> int:
+        return self.page_size

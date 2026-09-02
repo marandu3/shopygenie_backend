@@ -34,6 +34,9 @@ SHIFTS_VIEW = "shifts.view"
 # --- Reconciliation ---
 RECONCILIATION_VIEW = "reconciliation.view"
 
+# --- Audit ---
+AUDIT_VIEW = "audit.view"
+
 # --- Customers / Debts ---
 CUSTOMERS_VIEW = "customers.view"
 CUSTOMERS_CREATE = "customers.create"
@@ -73,6 +76,7 @@ ALL_PERMISSIONS: list[str] = [
     REPORTS_VIEW, REPORTS_EXPORT,
     WORKERS_INVITE, WORKERS_UPDATE, WORKERS_SUSPEND, ROLES_MANAGE,
     SETTINGS_MANAGE, BILLING_VIEW, BILLING_MANAGE,
+    AUDIT_VIEW,
 ]
 
 # System (built-in) roles. Tenant owners can later define custom roles with
@@ -89,6 +93,7 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         EXPENSES_VIEW, EXPENSES_CREATE, EXPENSES_APPROVE,
         REPORTS_VIEW, REPORTS_EXPORT,
         WORKERS_INVITE, WORKERS_UPDATE, WORKERS_SUSPEND,
+        AUDIT_VIEW,
     ],
     "Cashier": [
         SALES_VIEW, SALES_CREATE, SALES_REFUND,

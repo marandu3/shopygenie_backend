@@ -1,15 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, PaginationParams, require_permission
 from app.core.exceptions import NotFoundError
 from app.core.permissions import PURCHASES_CREATE, PURCHASES_RETURN, PURCHASES_VIEW
 from app.db.session import get_db
 from app.models.purchase import Purchase
+from app.schemas.common import Page
 from app.schemas.purchase import PurchaseCreate, PurchaseOut, VoidPurchaseRequest
 from app.schemas.returns import PurchaseReturnCreate, PurchaseReturnOut
 from app.services.purchase_returns import create_purchase_return
@@ -49,19 +50,23 @@ async def create_purchase_return_endpoint(
     return purchase_return
 
 
-@router.get("", response_model=list[PurchaseOut])
+@router.get("", response_model=Page[PurchaseOut])
 async def list_purchases(
     ctx: AuthContext = Depends(require_permission(PURCHASES_VIEW)),
     db: AsyncSession = Depends(get_db),
+    pagination: PaginationParams = Depends(),
 ):
     org_id = ctx.require_organization_id()
+    total = (await db.execute(select(func.count()).select_from(Purchase).where(Purchase.organization_id == org_id))).scalar_one()
     result = await db.execute(
         select(Purchase)
         .where(Purchase.organization_id == org_id)
         .options(selectinload(Purchase.items))
         .order_by(Purchase.created_at.desc())
+        .offset(pagination.offset)
+        .limit(pagination.limit)
     )
-    return list(result.scalars())
+    return Page(items=list(result.scalars()), total=total, page=pagination.page, page_size=pagination.page_size)
 
 
 @router.get("/{purchase_id}", response_model=PurchaseOut)

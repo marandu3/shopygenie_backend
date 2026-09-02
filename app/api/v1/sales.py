@@ -1,15 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, PaginationParams, require_permission
 from app.core.exceptions import NotFoundError
 from app.core.permissions import SALES_CREATE, SALES_REFUND, SALES_VIEW, SALES_VOID
 from app.db.session import get_db
 from app.models.sale import Sale
+from app.schemas.common import Page
 from app.schemas.returns import SaleReturnCreate, SaleReturnOut
 from app.schemas.sale import SaleCreate, SaleOut, VoidSaleRequest
 from app.services.sale_returns import create_sale_return
@@ -49,19 +50,23 @@ async def create_sale_return_endpoint(
     return sale_return
 
 
-@router.get("", response_model=list[SaleOut])
+@router.get("", response_model=Page[SaleOut])
 async def list_sales(
     ctx: AuthContext = Depends(require_permission(SALES_VIEW)),
     db: AsyncSession = Depends(get_db),
+    pagination: PaginationParams = Depends(),
 ):
     org_id = ctx.require_organization_id()
+    total = (await db.execute(select(func.count()).select_from(Sale).where(Sale.organization_id == org_id))).scalar_one()
     result = await db.execute(
         select(Sale)
         .where(Sale.organization_id == org_id)
         .options(selectinload(Sale.items), selectinload(Sale.payments))
         .order_by(Sale.created_at.desc())
+        .offset(pagination.offset)
+        .limit(pagination.limit)
     )
-    return list(result.scalars())
+    return Page(items=list(result.scalars()), total=total, page=pagination.page, page_size=pagination.page_size)
 
 
 @router.get("/{sale_id}", response_model=SaleOut)
