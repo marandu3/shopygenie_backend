@@ -9,8 +9,10 @@ from app.api.deps import AuthContext, require_permission, require_tenant_context
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.permissions import PRODUCTS_CREATE, PRODUCTS_DELETE, PRODUCTS_UPDATE, PRODUCTS_VIEW
 from app.db.session import get_db
+from app.models.inventory import InventoryMovement
 from app.models.product import Product
 from app.schemas.common import MessageResponse
+from app.schemas.inventory import InventoryMovementOut
 from app.schemas.product import (
     InventoryAdjustmentRequest,
     ProductCreate,
@@ -127,6 +129,27 @@ async def adjust_product_stock(
     await db.commit()
     await db.refresh(product)
     return product
+
+
+@router.get("/{product_id}/movements", response_model=list[InventoryMovementOut])
+async def product_movements(
+    product_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_permission(PRODUCTS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+):
+    org_id = ctx.require_organization_id()
+    product = await db.get(Product, product_id)
+    if product is None or product.organization_id != org_id:
+        raise NotFoundError("Product not found")
+
+    result = await db.execute(
+        select(InventoryMovement)
+        .where(InventoryMovement.organization_id == org_id, InventoryMovement.product_id == product_id)
+        .order_by(InventoryMovement.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars())
 
 
 @router.get("/stock/levels", response_model=list[StockLevelOut])

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth, customers, debts, expenses, organizations, platform, products, purchases, reports, sales, suppliers, workers
+from app.api.v1 import auth, categories, customers, debts, expenses, organizations, platform, products, purchases, reports, sales, suppliers, workers
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import RequestLoggingMiddleware, configure_logging
@@ -31,6 +31,7 @@ app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(organizations.router, prefix=API_PREFIX)
 app.include_router(workers.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)
+app.include_router(categories.router, prefix=API_PREFIX)
 app.include_router(customers.router, prefix=API_PREFIX)
 app.include_router(suppliers.router, prefix=API_PREFIX)
 app.include_router(sales.router, prefix=API_PREFIX)
