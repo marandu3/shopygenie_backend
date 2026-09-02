@@ -17,5 +17,44 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopygenie_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever's in .env — inside the compose network the
+      # database is reachable at the "postgres" service name, not localhost.
+      DATABASE_URL: postgresql+asyncpg://shopygenie:shopygenie@postgres:5432/shopygenie
+    ports:
+      - "8080:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ../shopygenie_frontend
+      dockerfile: Dockerfile
+    container_name: shopygenie_frontend
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  backend_uploads:

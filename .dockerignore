@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.git/
+.gitattributes
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.env
+uploads/
+pgdata/
+*.egg-info/
+.vscode/
+.idea/
+README.md

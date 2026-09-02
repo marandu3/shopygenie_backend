@@ -1,0 +1,44 @@
+# Render Blueprint — describes services/env var NAMES only. Values marked
+# `sync: false` are prompted for in the Render dashboard when the blueprint
+# is applied; nothing secret lives in this file. See DEPLOYMENT.md.
+databases:
+  - name: shopygenie-postgres
+    plan: starter
+    databaseName: shopygenie
+    user: shopygenie
+
+services:
+  - type: web
+    name: shopygenie-backend
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Render's fromDatabase binding yields "postgresql://..." — this app
+      # needs the async driver scheme. If the app fails to start with a
+      # driver error, override this var in the dashboard with the same
+      # value but "postgresql+asyncpg://" instead (see DEPLOYMENT.md §2.1).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: shopygenie-postgres
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PLATFORM_OWNER_EMAIL
+        sync: false
+      - key: PLATFORM_OWNER_PASSWORD
+        sync: false
+      - key: PLATFORM_OWNER_NAME
+        sync: false
+      - key: SMSGATE_BASE_URL
+        sync: false
+      - key: SMSGATE_API_KEY
+        sync: false
+      - key: SMSGATE_SENDER_ID
+        sync: false
