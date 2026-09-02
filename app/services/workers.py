@@ -6,10 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.security import generate_temporary_password, hash_password
+from app.models.notification import NotificationType
 from app.models.organization import Organization
 from app.models.user import Role, User, WorkerStatus
 from app.schemas.user import WorkerInvite
 from app.services.audit import log_action
+from app.services.notification_center import create_notification
 
 
 async def invite_worker(
@@ -57,6 +59,17 @@ async def invite_worker(
         resource_type="user",
         resource_id=str(worker.id),
         metadata={"email": worker.email, "role_id": str(payload.role_id)},
+    )
+
+    await create_notification(
+        db,
+        organization_id=organization_id,
+        type=NotificationType.INFO,
+        title="New worker invited",
+        body=f"{worker.full_name} was invited as a new worker.",
+        link="/workers",
+        resource_type="user",
+        resource_id=str(worker.id),
     )
 
     return worker, temporary_password

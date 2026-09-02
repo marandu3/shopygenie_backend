@@ -6,9 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.billing import ActivationRequest, ActivationRequestStatus
+from app.models.notification import NotificationType
 from app.models.organization import Organization, SubscriptionStatus
 from app.schemas.billing import ActivationRequestApprove, ActivationRequestCreate, ActivationRequestReject
 from app.services.audit import log_action
+from app.services.notification_center import create_notification
 
 
 async def submit_activation_request(
@@ -32,6 +34,18 @@ async def submit_activation_request(
         resource_type="activation_request",
         resource_id=str(request.id),
         metadata={"plan_requested": payload.plan_requested.value, "reference_number": request.reference_number},
+    )
+
+    org = await db.get(Organization, organization_id)
+    await create_notification(
+        db,
+        organization_id=None,  # platform-wide: every platform owner should see this
+        type=NotificationType.ACTION_REQUIRED,
+        title="New billing activation request",
+        body=f"{org.name if org else 'A tenant'} requested activation of the {payload.plan_requested.value} plan (ref: {request.reference_number}).",
+        link="/platform",
+        resource_type="activation_request",
+        resource_id=str(request.id),
     )
     return request
 
@@ -74,6 +88,16 @@ async def approve_activation_request(
             "expires_at": org.subscription_expires_at.isoformat(),
         },
     )
+    await create_notification(
+        db,
+        organization_id=request.organization_id,
+        type=NotificationType.SUCCESS,
+        title="Billing activation approved",
+        body=f"Your {request.plan_requested.value} plan is now active, valid until {org.subscription_expires_at.date().isoformat()}.",
+        link="/billing",
+        resource_type="activation_request",
+        resource_id=str(request.id),
+    )
     await db.flush()
     return request
 
@@ -101,6 +125,16 @@ async def reject_activation_request(
         resource_id=str(request.id),
         acting_as_platform_owner=True,
         reason=payload.review_note,
+    )
+    await create_notification(
+        db,
+        organization_id=request.organization_id,
+        type=NotificationType.WARNING,
+        title="Billing activation rejected",
+        body=f"Your {request.plan_requested.value} plan activation request was rejected: {payload.review_note}",
+        link="/billing",
+        resource_type="activation_request",
+        resource_id=str(request.id),
     )
     await db.flush()
     return request

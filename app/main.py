@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import audit, auth, billing, categories, customers, debts, expenses, organizations, platform, products, purchases, reconciliation, reports, sales, shifts, suppliers, workers
+from app.api.v1 import audit, auth, billing, categories, customers, debts, expenses, notifications, organizations, platform, products, purchases, reconciliation, reports, sales, shifts, suppliers, workers
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import RequestLoggingMiddleware, configure_logging
@@ -55,6 +55,7 @@ app.include_router(reconciliation.router, prefix=API_PREFIX)
 app.include_router(audit.router, prefix=API_PREFIX)
 app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(billing.router, prefix=API_PREFIX)
+app.include_router(notifications.router, prefix=API_PREFIX)
 app.include_router(platform.router, prefix=API_PREFIX)
 
 
