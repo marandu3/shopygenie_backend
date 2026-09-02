@@ -4,7 +4,7 @@ from app.models.counter import DocumentCounter
 from app.models.customer import Customer
 from app.models.debt import Debt, DebtPayment
 from app.models.expense import Expense, ExpenseCategory
-from app.models.inventory import InventoryMovement
+from app.models.inventory import InventoryCostLayer, InventoryMovement
 from app.models.notification import Notification, NotificationRead
 from app.models.organization import Branch, Organization, Register
 from app.models.product import Category, Product
@@ -25,6 +25,7 @@ __all__ = [
     "Expense",
     "ExpenseCategory",
     "InventoryMovement",
+    "InventoryCostLayer",
     "Notification",
     "NotificationRead",
     "Branch",

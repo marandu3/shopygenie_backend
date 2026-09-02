@@ -41,6 +41,7 @@ class OrganizationOut(ORMModel):
     tax_rate_percent: float
     tax_inclusive_pricing: bool
     low_stock_default_threshold: int
+    discount_auto_approve_threshold_percent: float | None = None
     subscription_status: str
     subscription_plan: str | None = None
     subscription_expires_at: datetime | None = None
@@ -55,3 +56,4 @@ class OrganizationSettingsUpdate(BaseModel):
     tax_rate_percent: float | None = Field(default=None, ge=0, le=100)
     tax_inclusive_pricing: bool | None = None
     low_stock_default_threshold: int | None = Field(default=None, ge=0)
+    discount_auto_approve_threshold_percent: float | None = Field(default=None, ge=0, le=100)

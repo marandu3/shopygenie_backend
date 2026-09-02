@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.product import Product
+from app.services.inventory_costing import add_cost_layer, consume_fifo
 
 
 async def adjust_stock(
@@ -40,21 +41,45 @@ async def adjust_stock(
 
     product.current_stock = new_quantity
     movement_type = MovementType.ADJUSTMENT_IN if quantity_delta > 0 else MovementType.ADJUSTMENT_OUT
+    now = datetime.now(timezone.utc)
 
-    db.add(
-        InventoryMovement(
+    movement = InventoryMovement(
+        organization_id=organization_id,
+        product_id=product.id,
+        movement_type=movement_type,
+        quantity=quantity_delta,
+        previous_quantity=previous_quantity,
+        resulting_quantity=new_quantity,
+        reference_type="manual_adjustment",
+        reason=reason,
+        performed_by=performed_by,
+        created_at=now,
+    )
+    db.add(movement)
+    await db.flush()
+
+    # Keep FIFO layers in sync with the cache: an increase opens a new layer
+    # at the product's current cost; a decrease draws down existing layers
+    # so a later sale still costs correctly (the drawn cost itself isn't
+    # needed here — only that quantity_remaining stays consistent).
+    if quantity_delta > 0:
+        await add_cost_layer(
+            db,
             organization_id=organization_id,
             product_id=product.id,
-            movement_type=movement_type,
+            source_type=CostLayerSource.ADJUSTMENT,
+            source_id=movement.id,
+            unit_cost=product.cost_price,
             quantity=quantity_delta,
-            previous_quantity=previous_quantity,
-            resulting_quantity=new_quantity,
-            reference_type="manual_adjustment",
-            reason=reason,
-            performed_by=performed_by,
-            created_at=datetime.now(timezone.utc),
+            created_at=now,
         )
-    )
+    else:
+        await consume_fifo(
+            db,
+            organization_id=organization_id,
+            product_id=product.id,
+            quantity_needed=-quantity_delta,
+            fallback_unit_cost=product.cost_price,
+        )
 
-    await db.flush()
     return product

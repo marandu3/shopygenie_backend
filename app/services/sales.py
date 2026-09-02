@@ -3,21 +3,47 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import InsufficientStockError, NotFoundError, ValidationAppError
+from app.core.permissions import DEBTS_OVERRIDE_LIMIT, DISCOUNTS_APPROVE
 from app.models.customer import Customer
 from app.models.debt import Debt
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.organization import Organization
 from app.models.product import Product
 from app.models.sale import Payment, PaymentMethod, Sale, SaleItem, SaleStatus
+from app.models.user import Role, RolePermission, User
 from app.schemas.sale import SaleCreate
 from app.services.audit import log_action
+from app.services.inventory_costing import add_cost_layer, consume_fifo
 from app.services.money import money, percent_of
 from app.services.numbering import next_document_number
+
+
+async def _validate_approver(
+    db: AsyncSession, *, organization_id: uuid.UUID, approver_id: uuid.UUID, permission_code: str
+) -> User:
+    """A discount-threshold override or a credit-limit override both need a
+    real, permission-holding human behind them — never just a client-side
+    checkbox. Raises if the named approver doesn't exist in this org (or
+    isn't the platform owner) or lacks the specific permission."""
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.role).selectinload(Role.permissions).selectinload(RolePermission.permission))
+        .where(User.id == approver_id)
+    )
+    approver = result.scalar_one_or_none()
+    if approver is None or (approver.organization_id != organization_id and not approver.is_platform_owner):
+        raise ValidationAppError("Approver not found in this organization", code="INVALID_APPROVER")
+    if approver.is_platform_owner:
+        return approver
+    codes = {rp.permission.code for rp in (approver.role.permissions if approver.role else [])}
+    if permission_code not in codes:
+        raise ValidationAppError(f"Approver lacks required permission: {permission_code}", code="APPROVER_LACKS_PERMISSION")
+    return approver
 
 
 async def create_sale(
@@ -78,12 +104,23 @@ async def create_sale(
         previous_quantity = product.current_stock
         product.current_stock -= item.quantity
 
+        # FIFO: cost this line at what the oldest available stock actually
+        # cost, not today's product.cost_price (see app/services/inventory_costing.py).
+        line_cost = await consume_fifo(
+            db,
+            organization_id=organization_id,
+            product_id=product.id,
+            quantity_needed=item.quantity,
+            fallback_unit_cost=product.cost_price,
+        )
+        unit_cost_price = money(line_cost / item.quantity)
+
         sale_items.append(
             SaleItem(
                 product_id=product.id,
                 product_name=product.name,
                 unit_selling_price=product.selling_price,
-                unit_cost_price=product.cost_price,
+                unit_cost_price=unit_cost_price,
                 quantity=item.quantity,
                 discount_amount=discount_amount,
                 line_total=line_total,
@@ -105,6 +142,19 @@ async def create_sale(
 
         subtotal += line_subtotal
         discount_total += discount_amount
+
+    threshold = org.discount_auto_approve_threshold_percent
+    if threshold is not None and subtotal > 0:
+        discount_percent = float(money((discount_total / subtotal) * 100))
+        if discount_percent > threshold:
+            if payload.discount_approved_by is None:
+                raise ValidationAppError(
+                    f"Discount ({discount_percent:.1f}%) exceeds the auto-approve threshold ({threshold}%) — manager approval required.",
+                    code="DISCOUNT_APPROVAL_REQUIRED",
+                )
+            await _validate_approver(
+                db, organization_id=organization_id, approver_id=payload.discount_approved_by, permission_code=DISCOUNTS_APPROVE
+            )
 
     net_before_tax = money(subtotal - discount_total)
     tax_rate = Decimal(str(org.tax_rate_percent))
@@ -171,6 +221,28 @@ async def create_sale(
                 "Payments do not cover the full total. Set allow_credit=true with a customer to sell on credit.",
                 code="INCOMPLETE_PAYMENT",
             )
+
+        # credit_limit == 0 means "no limit configured" (unset) — enforcement
+        # only activates once a tenant explicitly sets a positive limit.
+        if customer is not None and customer.credit_limit and customer.credit_limit > 0:
+            outstanding = (
+                await db.execute(
+                    select(func.coalesce(func.sum(Debt.balance), 0)).where(
+                        Debt.customer_id == customer.id, Debt.organization_id == organization_id, Debt.cleared.is_(False)
+                    )
+                )
+            ).scalar_one()
+            prospective_balance = money(Decimal(str(outstanding)) + remainder)
+            if prospective_balance > customer.credit_limit:
+                if payload.credit_override_by is None:
+                    raise ValidationAppError(
+                        f"Credit limit exceeded: limit {customer.credit_limit}, balance would become {prospective_balance}.",
+                        code="CREDIT_LIMIT_EXCEEDED",
+                    )
+                await _validate_approver(
+                    db, organization_id=organization_id, approver_id=payload.credit_override_by, permission_code=DEBTS_OVERRIDE_LIMIT
+                )
+
         db.add(
             Debt(
                 organization_id=organization_id,
@@ -250,6 +322,16 @@ async def void_sale(
                     performed_by=voided_by,
                     created_at=now,
                 )
+            )
+            await add_cost_layer(
+                db,
+                organization_id=organization_id,
+                product_id=product.id,
+                source_type=CostLayerSource.SALE_VOID,
+                source_id=sale.id,
+                unit_cost=item.unit_cost_price,
+                quantity=item.quantity,
+                created_at=now,
             )
 
     sale.status = SaleStatus.VOIDED

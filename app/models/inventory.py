@@ -1,8 +1,9 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Uuid
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,6 +22,36 @@ class MovementType(str, enum.Enum):
     LOSS = "LOSS"
     TRANSFER_IN = "TRANSFER_IN"
     TRANSFER_OUT = "TRANSFER_OUT"
+
+
+class CostLayerSource(str, enum.Enum):
+    PURCHASE = "PURCHASE"
+    OPENING_BALANCE = "OPENING_BALANCE"
+    SALE_RETURN = "SALE_RETURN"
+    SALE_VOID = "SALE_VOID"
+    ADJUSTMENT = "ADJUSTMENT"
+
+
+class InventoryCostLayer(UUIDPKMixin, TenantScopedMixin, Base):
+    """One FIFO cost layer per stock-in event, at that event's own unit
+    cost. A sale draws down layers oldest-first; the blended cost of what
+    it drew becomes that sale line's unit_cost_price — so COGS reflects
+    the actual historical cost of the units sold, never today's price.
+    Historical purchase/sale records are never rewritten; a return or void
+    re-injects stock as a brand-new layer (priced at what it left at), not
+    by rewinding the original layer it once came from."""
+
+    __tablename__ = "inventory_cost_layers"
+
+    product_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[CostLayerSource] = mapped_column(Enum(CostLayerSource, name="cost_layer_source"), nullable=False)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    quantity_received: Mapped[int] = mapped_column(nullable=False)
+    quantity_remaining: Mapped[int] = mapped_column(nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class InventoryMovement(UUIDPKMixin, TenantScopedMixin, Base):

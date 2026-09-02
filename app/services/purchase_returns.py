@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.product import Product
 from app.models.purchase import Purchase, PurchaseItem, PurchaseStatus
 from app.models.return_models import PurchaseReturn, PurchaseReturnItem
 from app.schemas.returns import PurchaseReturnCreate
 from app.services.audit import log_action
+from app.services.inventory_costing import reduce_layer_for_source
 from app.services.money import money
 
 
@@ -108,6 +109,14 @@ async def create_purchase_return(
                 performed_by=processed_by,
                 created_at=now,
             )
+        )
+        await reduce_layer_for_source(
+            db,
+            organization_id=organization_id,
+            product_id=product.id,
+            source_type=CostLayerSource.PURCHASE,
+            source_id=purchase_item.id,
+            quantity=line.quantity,
         )
 
     total_refund = money(total_refund)

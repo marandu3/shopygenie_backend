@@ -9,12 +9,13 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.models.debt import Debt
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.product import Product
 from app.models.return_models import SaleReturn, SaleReturnItem
 from app.models.sale import Sale, SaleItem, SaleStatus
 from app.schemas.returns import SaleReturnCreate
 from app.services.audit import log_action
+from app.services.inventory_costing import add_cost_layer
 from app.services.money import money
 
 
@@ -105,6 +106,16 @@ async def create_sale_return(
                 performed_by=processed_by,
                 created_at=now,
             )
+        )
+        await add_cost_layer(
+            db,
+            organization_id=organization_id,
+            product_id=product.id,
+            source_type=CostLayerSource.SALE_RETURN,
+            source_id=sale_item.id,
+            unit_cost=sale_item.unit_cost_price,
+            quantity=line.quantity,
+            created_at=now,
         )
 
     total_refund = money(total_refund)

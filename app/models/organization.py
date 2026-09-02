@@ -41,6 +41,12 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
 
     low_stock_default_threshold: Mapped[int] = mapped_column(default=5, nullable=False)
 
+    # Null = no restriction (every discount auto-approves) — preserves prior
+    # behavior for tenants that never configure this. Set = a cashier's
+    # discount above this percent of the sale's subtotal requires a
+    # DISCOUNTS_APPROVE-holding approver's id on the sale payload.
+    discount_auto_approve_threshold_percent: Mapped[float | None] = mapped_column(nullable=True)
+
     subscription_status: Mapped[SubscriptionStatus] = mapped_column(
         Enum(SubscriptionStatus, name="subscription_status"), default=SubscriptionStatus.TRIAL, nullable=False
     )

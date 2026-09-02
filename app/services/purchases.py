@@ -8,11 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.product import Product
 from app.models.purchase import Purchase, PurchaseItem, PurchaseStatus
 from app.schemas.purchase import PurchaseCreate
 from app.services.audit import log_action
+from app.services.inventory_costing import add_cost_layer, reduce_layer_for_source
 from app.services.money import money
 from app.services.numbering import next_document_number
 
@@ -89,11 +90,23 @@ async def create_purchase(
         items=purchase_items,
     )
     db.add(purchase)
-    await db.flush()
+    await db.flush()  # assigns purchase.id and each purchase_item.id
 
     for movement in movements:
         movement.reference_id = purchase.id
         db.add(movement)
+
+    for purchase_item in purchase_items:
+        await add_cost_layer(
+            db,
+            organization_id=organization_id,
+            product_id=purchase_item.product_id,
+            source_type=CostLayerSource.PURCHASE,
+            source_id=purchase_item.id,
+            unit_cost=purchase_item.unit_cost_price,
+            quantity=purchase_item.quantity,
+            created_at=now,
+        )
 
     await log_action(
         db,
@@ -159,6 +172,14 @@ async def void_purchase(
                     performed_by=voided_by,
                     created_at=now,
                 )
+            )
+            await reduce_layer_for_source(
+                db,
+                organization_id=organization_id,
+                product_id=product.id,
+                source_type=CostLayerSource.PURCHASE,
+                source_id=item.id,
+                quantity=item.quantity,
             )
 
     purchase.status = PurchaseStatus.VOIDED

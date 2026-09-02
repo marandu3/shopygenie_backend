@@ -25,6 +25,8 @@ class SaleCreate(BaseModel):
     items: list[SaleItemIn]
     payments: list[PaymentIn] = []
     allow_credit: bool = False  # if total exceeds payments, remainder becomes a Debt (requires customer_id)
+    discount_approved_by: uuid.UUID | None = None  # required if discount % exceeds the org's auto-approve threshold
+    credit_override_by: uuid.UUID | None = None  # required if this credit sale would exceed the customer's credit_limit
 
     @model_validator(mode="after")
     def validate_items(self):

@@ -10,7 +10,7 @@ from app.api.deps import AuthContext, require_permission, require_tenant_context
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.permissions import PRODUCTS_CREATE, PRODUCTS_DELETE, PRODUCTS_UPDATE, PRODUCTS_VIEW
 from app.db.session import get_db
-from app.models.inventory import InventoryMovement, MovementType
+from app.models.inventory import CostLayerSource, InventoryMovement, MovementType
 from app.models.product import Product
 from app.schemas.common import MessageResponse
 from app.schemas.inventory import InventoryMovementOut
@@ -24,6 +24,7 @@ from app.schemas.product import (
     StockValuationOut,
 )
 from app.services.inventory import adjust_stock
+from app.services.inventory_costing import add_cost_layer
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -44,6 +45,7 @@ async def create_product(
         # opening balance is the entry for stock that existed before the
         # product had any purchases/sales (fixes: current_stock as the only
         # source of truth, and keeps /reconciliation/inventory meaningful).
+        now = datetime.now(timezone.utc)
         db.add(
             InventoryMovement(
                 organization_id=org_id,
@@ -54,8 +56,18 @@ async def create_product(
                 resulting_quantity=product.current_stock,
                 reference_type="product_created",
                 performed_by=ctx.user_id,
-                created_at=datetime.now(timezone.utc),
+                created_at=now,
             )
+        )
+        await add_cost_layer(
+            db,
+            organization_id=org_id,
+            product_id=product.id,
+            source_type=CostLayerSource.OPENING_BALANCE,
+            source_id=product.id,
+            unit_cost=product.cost_price,
+            quantity=product.current_stock,
+            created_at=now,
         )
 
     try:
