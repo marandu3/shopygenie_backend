@@ -21,6 +21,7 @@ from app.core.permissions import ALL_PERMISSIONS, SYSTEM_ROLE_PERMISSIONS
 from app.core.security import hash_password
 from app.db.base import AsyncSessionLocal
 from app.models.customer import Customer
+from app.models.inventory import InventoryMovement, MovementType
 from app.models.organization import Branch, Organization, Register, SubscriptionStatus
 from app.models.product import Category, Product
 from app.models.supplier import Supplier
@@ -51,9 +52,17 @@ async def seed_permissions_and_roles(db) -> dict[str, Role]:
             db.add(role)
             await db.flush()
 
-            for code in permission_codes:
-                db.add(RolePermission(role_id=role.id, permission_id=code_to_permission[code].id))
-            await db.flush()
+        # Reconcile permissions even for a role that already existed — this
+        # is what lets a newly-added permission (e.g. a new module shipped
+        # later) reach roles seeded by an earlier run, without ever removing
+        # a permission a tenant may have customized by hand.
+        existing_result = await db.execute(select(RolePermission.permission_id).where(RolePermission.role_id == role.id))
+        existing_permission_ids = {row[0] for row in existing_result.all()}
+        for code in permission_codes:
+            permission = code_to_permission[code]
+            if permission.id not in existing_permission_ids:
+                db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        await db.flush()
         roles[role_name] = role
 
     return roles
@@ -158,6 +167,16 @@ async def seed_demo_tenant(db, roles: dict[str, Role]) -> None:
         ),
     ]
     db.add_all(products)
+    await db.flush()
+
+    for p in products:
+        db.add(
+            InventoryMovement(
+                organization_id=org.id, product_id=p.id, movement_type=MovementType.OPENING_BALANCE,
+                quantity=p.current_stock, previous_quantity=0, resulting_quantity=p.current_stock,
+                reference_type="product_created", performed_by=owner.id, created_at=datetime.now(timezone.utc),
+            )
+        )
     await db.flush()
 
     customer = Customer(organization_id=org.id, name="Jane Walk-in", phone="+255711111111", credit_limit=Decimal("50000"))

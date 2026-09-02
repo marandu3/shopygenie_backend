@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest_asyncio
@@ -11,6 +12,7 @@ from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.main import app
+from app.models.inventory import InventoryMovement, MovementType
 from app.models.organization import Branch, Organization, Register
 from app.models.product import Category, Product
 from app.models.supplier import Supplier
@@ -124,6 +126,16 @@ async def tenant(db) -> Tenant:
         current_stock=5, low_stock_alert=1,
     )
     db.add_all([product, product2])
+    await db.flush()
+
+    for p in (product, product2):
+        db.add(
+            InventoryMovement(
+                organization_id=org.id, product_id=p.id, movement_type=MovementType.OPENING_BALANCE,
+                quantity=p.current_stock, previous_quantity=0, resulting_quantity=p.current_stock,
+                reference_type="product_created", performed_by=owner.id, created_at=datetime.now(timezone.utc),
+            )
+        )
     await db.flush()
 
     from app.models.customer import Customer
