@@ -13,6 +13,20 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 REFRESH_COOKIE_NAME = "shopygenie_refresh_token"
 
 
+def _to_current_user(ctx: AuthContext) -> CurrentUser:
+    return CurrentUser(
+        id=ctx.user.id,
+        organization_id=ctx.organization_id,
+        full_name=ctx.user.full_name,
+        email=ctx.user.email,
+        is_platform_owner=ctx.user.is_platform_owner,
+        acting_as_platform_owner=ctx.is_platform_owner_acting_as_tenant,
+        must_change_password=ctx.user.must_change_password,
+        role_name=ctx.user.role.name if ctx.user.role else None,
+        permissions=sorted(ctx.permissions),
+    )
+
+
 def _set_refresh_cookie(response: Response, token: str) -> None:
     settings = get_settings()
     response.set_cookie(
@@ -77,27 +91,9 @@ async def change_password(
         db, user=ctx.user, current_password=payload.current_password, new_password=payload.new_password
     )
     await db.commit()
-    return CurrentUser(
-        id=ctx.user.id,
-        organization_id=ctx.user.organization_id,
-        full_name=ctx.user.full_name,
-        email=ctx.user.email,
-        is_platform_owner=ctx.user.is_platform_owner,
-        must_change_password=False,
-        role_name=ctx.user.role.name if ctx.user.role else None,
-        permissions=sorted(ctx.permissions),
-    )
+    return _to_current_user(ctx)
 
 
 @router.get("/me", response_model=CurrentUser)
 async def me(request: Request, ctx: AuthContext = Depends(get_current_context)):
-    return CurrentUser(
-        id=ctx.user.id,
-        organization_id=ctx.user.organization_id,
-        full_name=ctx.user.full_name,
-        email=ctx.user.email,
-        is_platform_owner=ctx.user.is_platform_owner,
-        must_change_password=ctx.user.must_change_password,
-        role_name=ctx.user.role.name if ctx.user.role else None,
-        permissions=sorted(ctx.permissions),
-    )
+    return _to_current_user(ctx)

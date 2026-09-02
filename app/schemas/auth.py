@@ -28,10 +28,11 @@ class ChangePasswordRequest(BaseModel):
 
 class CurrentUser(ORMModel):
     id: uuid.UUID
-    organization_id: uuid.UUID | None
+    organization_id: uuid.UUID | None  # resolved: the entered tenant while in platform-owner tenant-mode
     full_name: str
     email: str
     is_platform_owner: bool
+    acting_as_platform_owner: bool = False  # true only while in tenant-mode via /platform/.../enter
     must_change_password: bool
     role_name: str | None = None
     permissions: list[str] = []
