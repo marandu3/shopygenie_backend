@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.core.rate_limit import login_rate_limiter
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.main import app
@@ -20,6 +21,18 @@ from app.models.user import Role, User, WorkerStatus
 from scripts.seed import seed_permissions_and_roles
 
 settings = get_settings()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_rate_limiter():
+    """The login rate limiter is a module-level singleton (by design — see
+    app/core/rate_limit.py) so it persists across this whole pytest session
+    under one shared test-client IP, which would otherwise starve later
+    tests. Reset before each test so tests stay independent of each other;
+    test_account_locks_after_repeated_failed_logins is what actually
+    exercises the limiter's real behavior."""
+    login_rate_limiter._hits.clear()
+    yield
 
 
 @pytest_asyncio.fixture

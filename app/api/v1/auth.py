@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AuthContext, get_current_context
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedError
+from app.core.rate_limit import client_ip, login_rate_limiter
 from app.db.session import get_db
 from app.schemas.auth import ChangePasswordRequest, CurrentUser, LoginRequest, TokenResponse
 from app.services import auth as auth_service
@@ -41,7 +42,12 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def login(payload: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    # IP-based limiter catches credential-stuffing across many accounts;
+    # the per-account lockout in auth_service.authenticate catches repeated
+    # guesses against one account. Neither alone is enough.
+    login_rate_limiter.check(f"login:{client_ip(request)}")
+
     user = await auth_service.authenticate(db, email=payload.email, password=payload.password)
     access_token, refresh_token, _ = await auth_service.issue_tokens(db, user=user)
     await db.commit()
