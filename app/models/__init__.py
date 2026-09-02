@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.billing import ActivationRequest
 from app.models.counter import DocumentCounter
 from app.models.customer import Customer
 from app.models.debt import Debt, DebtPayment
@@ -15,6 +16,7 @@ from app.models.user import Permission, RefreshToken, Role, RolePermission, User
 
 __all__ = [
     "AuditLog",
+    "ActivationRequest",
     "DocumentCounter",
     "Customer",
     "Debt",

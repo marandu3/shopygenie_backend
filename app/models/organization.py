@@ -1,7 +1,8 @@
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String, Uuid
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,6 +17,12 @@ class SubscriptionStatus(str, enum.Enum):
     SUSPENDED = "SUSPENDED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
+
+
+class SubscriptionPlan(str, enum.Enum):
+    BASIC = "BASIC"
+    STANDARD = "STANDARD"
+    PREMIUM = "PREMIUM"
 
 
 class Organization(UUIDPKMixin, TimestampMixin, Base):
@@ -37,6 +44,10 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
     subscription_status: Mapped[SubscriptionStatus] = mapped_column(
         Enum(SubscriptionStatus, name="subscription_status"), default=SubscriptionStatus.TRIAL, nullable=False
     )
+    subscription_plan: Mapped[SubscriptionPlan | None] = mapped_column(
+        Enum(SubscriptionPlan, name="subscription_plan"), nullable=True
+    )
+    subscription_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 

@@ -42,6 +42,8 @@ class OrganizationOut(ORMModel):
     tax_inclusive_pricing: bool
     low_stock_default_threshold: int
     subscription_status: str
+    subscription_plan: str | None = None
+    subscription_expires_at: datetime | None = None
     is_active: bool
     created_at: datetime
 

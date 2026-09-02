@@ -4,12 +4,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_platform_owner
+from app.api.deps import AuthContext, PaginationParams, require_platform_owner
 from app.core.exceptions import NotFoundError
 from app.core.security import create_access_token
 from app.db.session import get_db
+from app.models.billing import ActivationRequestStatus
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.billing import ActivationRequestAdminOut, ActivationRequestApprove, ActivationRequestReject
+from app.schemas.common import Page
 from app.schemas.platform import (
     EnterTenantResponse,
     OrganizationAdminOut,
@@ -17,11 +20,32 @@ from app.schemas.platform import (
     PlatformKPIs,
 )
 from app.services.audit import log_action
+from app.services.billing import approve_activation_request, platform_list_activation_requests, reject_activation_request
 from app.services.notifications import send_sms
 from app.services.platform import platform_kpis, provision_organization, set_organization_active
 from app.services.workers import build_invitation_sms
 
 router = APIRouter(prefix="/platform", tags=["Platform"])
+
+
+def _to_admin_out(request, organization_name: str) -> ActivationRequestAdminOut:
+    # Built explicitly (not model_validate on the ORM row) because
+    # organization_name isn't a column on ActivationRequest — it comes from
+    # a join and has no value until we attach it here.
+    return ActivationRequestAdminOut(
+        id=request.id,
+        organization_id=request.organization_id,
+        requested_by=request.requested_by,
+        plan_requested=request.plan_requested,
+        reference_number=request.reference_number,
+        note=request.note,
+        status=request.status,
+        reviewed_by=request.reviewed_by,
+        reviewed_at=request.reviewed_at,
+        review_note=request.review_note,
+        created_at=request.created_at,
+        organization_name=organization_name,
+    )
 
 
 @router.get("/kpis", response_model=PlatformKPIs)
@@ -118,3 +142,49 @@ async def enter_tenant_mode(
 
     access_token = create_access_token(ctx.user_id, extra_claims={"act_org": str(organization_id)})
     return EnterTenantResponse(access_token=access_token, organization_id=organization_id, organization_name=org.name)
+
+
+@router.get("/activation-requests", response_model=Page[ActivationRequestAdminOut])
+async def list_activation_requests(
+    status: ActivationRequestStatus | None = None,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+    pagination: PaginationParams = Depends(),
+):
+    """Every tenant's billing-activation claims, across all organizations —
+    this is the platform owner's manual-verification queue (no payment
+    gateway is wired; each claim is checked against the reference number by
+    a human before the organization's subscription is activated)."""
+    rows, total = await platform_list_activation_requests(
+        db, status_filter=status, offset=pagination.offset, limit=pagination.limit
+    )
+    items = [_to_admin_out(request, org_name) for request, org_name in rows]
+    return Page(items=items, total=total, page=pagination.page, page_size=pagination.page_size)
+
+
+@router.post("/activation-requests/{request_id}/approve", response_model=ActivationRequestAdminOut)
+async def approve_activation_request_endpoint(
+    request_id: uuid.UUID,
+    payload: ActivationRequestApprove,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    request = await approve_activation_request(db, request_id=request_id, actor_id=ctx.user_id, payload=payload)
+    org = await db.get(Organization, request.organization_id)
+    await db.commit()
+    await db.refresh(request)
+    return _to_admin_out(request, org.name if org else "")
+
+
+@router.post("/activation-requests/{request_id}/reject", response_model=ActivationRequestAdminOut)
+async def reject_activation_request_endpoint(
+    request_id: uuid.UUID,
+    payload: ActivationRequestReject,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    request = await reject_activation_request(db, request_id=request_id, actor_id=ctx.user_id, payload=payload)
+    org = await db.get(Organization, request.organization_id)
+    await db.commit()
+    await db.refresh(request)
+    return _to_admin_out(request, org.name if org else "")
