@@ -6,6 +6,16 @@ from pydantic import BaseModel, Field
 from app.schemas.common import ORMModel
 
 
+class ExpenseCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+
+
+class ExpenseCategoryOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    is_active: bool
+
+
 class ExpenseCreate(BaseModel):
     description: str = Field(min_length=1, max_length=300)
     amount: float = Field(gt=0)
