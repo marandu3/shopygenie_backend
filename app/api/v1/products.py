@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from app.api.deps import AuthContext, require_permission, require_tenant_context
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.permissions import PRODUCTS_CREATE, PRODUCTS_DELETE, PRODUCTS_UPDATE, PRODUCTS_VIEW
 from app.db.session import get_db
-from app.models.inventory import InventoryMovement
+from app.models.inventory import InventoryMovement, MovementType
 from app.models.product import Product
 from app.schemas.common import MessageResponse
 from app.schemas.inventory import InventoryMovementOut
@@ -36,6 +37,27 @@ async def create_product(
     org_id = ctx.require_organization_id()
     product = Product(organization_id=org_id, **payload.model_dump())
     db.add(product)
+    await db.flush()
+
+    if product.current_stock > 0:
+        # Every unit of stock must be traceable to a ledger entry — an
+        # opening balance is the entry for stock that existed before the
+        # product had any purchases/sales (fixes: current_stock as the only
+        # source of truth, and keeps /reconciliation/inventory meaningful).
+        db.add(
+            InventoryMovement(
+                organization_id=org_id,
+                product_id=product.id,
+                movement_type=MovementType.OPENING_BALANCE,
+                quantity=product.current_stock,
+                previous_quantity=0,
+                resulting_quantity=product.current_stock,
+                reference_type="product_created",
+                performed_by=ctx.user_id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+
     try:
         await db.commit()
     except IntegrityError:

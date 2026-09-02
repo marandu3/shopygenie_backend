@@ -7,10 +7,12 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import AuthContext, require_permission
 from app.core.exceptions import NotFoundError
-from app.core.permissions import PURCHASES_CREATE, PURCHASES_VIEW
+from app.core.permissions import PURCHASES_CREATE, PURCHASES_RETURN, PURCHASES_VIEW
 from app.db.session import get_db
 from app.models.purchase import Purchase
 from app.schemas.purchase import PurchaseCreate, PurchaseOut, VoidPurchaseRequest
+from app.schemas.returns import PurchaseReturnCreate, PurchaseReturnOut
+from app.services.purchase_returns import create_purchase_return
 from app.services.purchases import create_purchase, void_purchase
 
 router = APIRouter(prefix="/purchases", tags=["Purchases"])
@@ -28,6 +30,23 @@ async def create_purchase_endpoint(
     await db.commit()
     await db.refresh(purchase, attribute_names=["items"])
     return purchase
+
+
+@router.post("/{purchase_id}/returns", response_model=PurchaseReturnOut, status_code=201)
+async def create_purchase_return_endpoint(
+    purchase_id: uuid.UUID,
+    payload: PurchaseReturnCreate,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission(PURCHASES_RETURN)),
+    db: AsyncSession = Depends(get_db),
+):
+    org_id = ctx.require_organization_id()
+    purchase_return = await create_purchase_return(
+        db, organization_id=org_id, purchase_id=purchase_id, payload=payload, processed_by=ctx.user_id, request=request
+    )
+    await db.commit()
+    await db.refresh(purchase_return, attribute_names=["items"])
+    return purchase_return
 
 
 @router.get("", response_model=list[PurchaseOut])
