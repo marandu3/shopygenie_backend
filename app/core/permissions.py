@@ -1,0 +1,105 @@
+"""Central registry of permission codes and the system role -> permission map.
+
+Adding a new permission = add the constant + attach it to whichever system
+roles should have it in SYSTEM_ROLE_PERMISSIONS. Nothing else in the codebase
+should hard-code a role name to decide access — always check a permission.
+"""
+
+# --- Sales / POS ---
+SALES_VIEW = "sales.view"
+SALES_CREATE = "sales.create"
+SALES_VOID = "sales.void"
+SALES_REFUND = "sales.refund"
+
+# --- Products ---
+PRODUCTS_VIEW = "products.view"
+PRODUCTS_CREATE = "products.create"
+PRODUCTS_UPDATE = "products.update"
+PRODUCTS_DELETE = "products.delete"
+
+# --- Inventory ---
+INVENTORY_VIEW = "inventory.view"
+INVENTORY_ADJUST = "inventory.adjust"
+
+# --- Purchases / Suppliers ---
+PURCHASES_VIEW = "purchases.view"
+PURCHASES_CREATE = "purchases.create"
+SUPPLIERS_MANAGE = "suppliers.manage"
+
+# --- Customers / Debts ---
+CUSTOMERS_VIEW = "customers.view"
+CUSTOMERS_CREATE = "customers.create"
+CUSTOMERS_UPDATE = "customers.update"
+DEBTS_VIEW = "debts.view"
+DEBTS_COLLECT = "debts.collect"
+
+# --- Expenses ---
+EXPENSES_VIEW = "expenses.view"
+EXPENSES_CREATE = "expenses.create"
+EXPENSES_APPROVE = "expenses.approve"
+
+# --- Reports ---
+REPORTS_VIEW = "reports.view"
+REPORTS_EXPORT = "reports.export"
+
+# --- Workers / org administration ---
+WORKERS_INVITE = "workers.invite"
+WORKERS_UPDATE = "workers.update"
+WORKERS_SUSPEND = "workers.suspend"
+ROLES_MANAGE = "roles.manage"
+
+# --- Settings / billing ---
+SETTINGS_MANAGE = "settings.manage"
+BILLING_VIEW = "billing.view"
+BILLING_MANAGE = "billing.manage"
+
+ALL_PERMISSIONS: list[str] = [
+    SALES_VIEW, SALES_CREATE, SALES_VOID, SALES_REFUND,
+    PRODUCTS_VIEW, PRODUCTS_CREATE, PRODUCTS_UPDATE, PRODUCTS_DELETE,
+    INVENTORY_VIEW, INVENTORY_ADJUST,
+    PURCHASES_VIEW, PURCHASES_CREATE, SUPPLIERS_MANAGE,
+    CUSTOMERS_VIEW, CUSTOMERS_CREATE, CUSTOMERS_UPDATE, DEBTS_VIEW, DEBTS_COLLECT,
+    EXPENSES_VIEW, EXPENSES_CREATE, EXPENSES_APPROVE,
+    REPORTS_VIEW, REPORTS_EXPORT,
+    WORKERS_INVITE, WORKERS_UPDATE, WORKERS_SUSPEND, ROLES_MANAGE,
+    SETTINGS_MANAGE, BILLING_VIEW, BILLING_MANAGE,
+]
+
+# System (built-in) roles. Tenant owners can later define custom roles with
+# their own permission subsets — this map only seeds the built-ins.
+SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
+    "Tenant Owner": ALL_PERMISSIONS,
+    "Manager": [
+        SALES_VIEW, SALES_CREATE, SALES_VOID, SALES_REFUND,
+        PRODUCTS_VIEW, PRODUCTS_CREATE, PRODUCTS_UPDATE,
+        INVENTORY_VIEW, INVENTORY_ADJUST,
+        PURCHASES_VIEW, PURCHASES_CREATE, SUPPLIERS_MANAGE,
+        CUSTOMERS_VIEW, CUSTOMERS_CREATE, CUSTOMERS_UPDATE, DEBTS_VIEW, DEBTS_COLLECT,
+        EXPENSES_VIEW, EXPENSES_CREATE, EXPENSES_APPROVE,
+        REPORTS_VIEW, REPORTS_EXPORT,
+        WORKERS_INVITE, WORKERS_UPDATE, WORKERS_SUSPEND,
+    ],
+    "Cashier": [
+        SALES_VIEW, SALES_CREATE,
+        PRODUCTS_VIEW,
+        CUSTOMERS_VIEW, CUSTOMERS_CREATE,
+        DEBTS_VIEW, DEBTS_COLLECT,
+    ],
+    "Inventory Manager": [
+        PRODUCTS_VIEW, PRODUCTS_CREATE, PRODUCTS_UPDATE,
+        INVENTORY_VIEW, INVENTORY_ADJUST,
+        PURCHASES_VIEW, PURCHASES_CREATE, SUPPLIERS_MANAGE,
+        REPORTS_VIEW,
+    ],
+    "Accountant": [
+        SALES_VIEW, PURCHASES_VIEW,
+        CUSTOMERS_VIEW, DEBTS_VIEW, DEBTS_COLLECT,
+        EXPENSES_VIEW, EXPENSES_CREATE, EXPENSES_APPROVE,
+        REPORTS_VIEW, REPORTS_EXPORT,
+        BILLING_VIEW,
+    ],
+    "Viewer": [
+        SALES_VIEW, PRODUCTS_VIEW, INVENTORY_VIEW, PURCHASES_VIEW,
+        CUSTOMERS_VIEW, DEBTS_VIEW, EXPENSES_VIEW, REPORTS_VIEW,
+    ],
+}
