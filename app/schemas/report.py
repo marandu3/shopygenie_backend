@@ -45,3 +45,76 @@ class BusinessSummaryReport(BaseModel):
     lowest_spending_customer: str | None = None
 
     generated_at: datetime
+
+
+class PaymentMethodTotal(BaseModel):
+    method: str
+    total: float
+
+
+class SalesReport(BaseModel):
+    gross_sales: float = 0  # subtotal before discounts, across completed sales
+    discounts: float = 0
+    tax: float = 0
+    net_sales: float = 0  # == revenue in BusinessSummaryReport
+    refund_amount: float = 0
+    transactions: int = 0
+    units_sold: int = 0
+    average_transaction: float = 0
+    payment_breakdown: list[PaymentMethodTotal] = []
+    generated_at: datetime
+
+
+class ProductMovementSummary(BaseModel):
+    product_id: uuid.UUID
+    product_name: str
+    units_sold: int
+    revenue: float
+
+
+class InventoryReport(BaseModel):
+    total_stock_value: float = 0
+    low_stock_count: int = 0
+    out_of_stock_count: int = 0
+    fast_movers: list[ProductMovementSummary] = []
+    slow_movers: list[ProductMovementSummary] = []  # includes zero-movement products
+    generated_at: datetime
+
+
+class CustomerSpend(BaseModel):
+    customer_id: uuid.UUID
+    customer_name: str
+    total_spent: float
+    transactions: int
+
+
+class CustomerReport(BaseModel):
+    total_customers: int = 0
+    new_customers: int = 0  # created within the filter window
+    top_customers: list[CustomerSpend] = []
+    total_outstanding_receivables: float = 0
+    generated_at: datetime
+
+
+class SupplierPurchaseSummary(BaseModel):
+    supplier_id: uuid.UUID | None
+    supplier_name: str
+    total_purchased: float
+    purchase_count: int
+
+
+class SupplierReport(BaseModel):
+    suppliers: list[SupplierPurchaseSummary] = []
+    generated_at: datetime
+
+
+class DebtAgingBucket(BaseModel):
+    label: str
+    count: int
+    amount: float
+
+
+class DebtAgingReport(BaseModel):
+    buckets: list[DebtAgingBucket] = []
+    total_outstanding: float = 0
+    generated_at: datetime

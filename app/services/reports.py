@@ -8,10 +8,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.customer import Customer
 from app.models.debt import Debt
 from app.models.expense import Expense
+from app.models.product import Product
 from app.models.purchase import Purchase, PurchaseStatus
-from app.models.sale import Sale, SaleItem, SaleStatus
-from app.schemas.report import BusinessSummaryReport, ReportFilters
+from app.models.return_models import SaleReturn
+from app.models.sale import Payment, Sale, SaleItem, SaleStatus
+from app.models.supplier import Supplier
+from app.schemas.report import (
+    BusinessSummaryReport,
+    CustomerReport,
+    CustomerSpend,
+    DebtAgingBucket,
+    DebtAgingReport,
+    InventoryReport,
+    PaymentMethodTotal,
+    ProductMovementSummary,
+    ReportFilters,
+    SalesReport,
+    SupplierPurchaseSummary,
+    SupplierReport,
+)
 from app.services.money import money
+
+
+def _sale_conditions(organization_id: uuid.UUID, filters: ReportFilters) -> list:
+    conditions = [Sale.organization_id == organization_id, Sale.status == SaleStatus.COMPLETED]
+    if filters.start_date:
+        conditions.append(Sale.created_at >= filters.start_date)
+    if filters.end_date:
+        conditions.append(Sale.created_at <= filters.end_date)
+    if filters.branch_id:
+        conditions.append(Sale.branch_id == filters.branch_id)
+    if filters.customer_id:
+        conditions.append(Sale.customer_id == filters.customer_id)
+    return conditions
 
 
 async def build_business_summary(
@@ -29,15 +58,7 @@ async def build_business_summary(
       outstanding_receivables = uncleared Debt balances — reported separately,
                                  never subtracted as if it were an expense.
     """
-    sale_conditions = [Sale.organization_id == organization_id, Sale.status == SaleStatus.COMPLETED]
-    if filters.start_date:
-        sale_conditions.append(Sale.created_at >= filters.start_date)
-    if filters.end_date:
-        sale_conditions.append(Sale.created_at <= filters.end_date)
-    if filters.branch_id:
-        sale_conditions.append(Sale.branch_id == filters.branch_id)
-    if filters.customer_id:
-        sale_conditions.append(Sale.customer_id == filters.customer_id)
+    sale_conditions = _sale_conditions(organization_id, filters)
 
     revenue_row = (
         await db.execute(
@@ -147,3 +168,207 @@ async def _extreme_customer_by_revenue(db: AsyncSession, sale_conditions: list, 
     )
     row = (await db.execute(query)).first()
     return row[0] if row else None
+
+
+async def build_sales_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> SalesReport:
+    sale_conditions = _sale_conditions(organization_id, filters)
+
+    totals_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(Sale.subtotal), 0),
+                func.coalesce(func.sum(Sale.discount_total), 0),
+                func.coalesce(func.sum(Sale.tax_total), 0),
+                func.coalesce(func.sum(Sale.total_amount), 0),
+                func.count(Sale.id),
+            ).where(*sale_conditions)
+        )
+    ).one()
+    gross_sales, discounts, tax, net_sales, transactions = (
+        money(totals_row[0]), money(totals_row[1]), money(totals_row[2]), money(totals_row[3]), int(totals_row[4])
+    )
+
+    units_row = (
+        await db.execute(
+            select(func.coalesce(func.sum(SaleItem.quantity), 0))
+            .select_from(SaleItem)
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(*sale_conditions)
+        )
+    ).scalar_one()
+    units_sold = int(units_row)
+
+    refund_row = (
+        await db.execute(
+            select(func.coalesce(func.sum(SaleReturn.refund_amount), 0))
+            .select_from(SaleReturn)
+            .join(Sale, Sale.id == SaleReturn.sale_id)
+            .where(*sale_conditions)
+        )
+    ).scalar_one()
+    refund_amount = money(refund_row)
+
+    payment_rows = await db.execute(
+        select(Payment.method, func.coalesce(func.sum(Payment.amount), 0))
+        .select_from(Payment)
+        .join(Sale, Sale.id == Payment.sale_id)
+        .where(*sale_conditions)
+        .group_by(Payment.method)
+    )
+    payment_breakdown = [PaymentMethodTotal(method=row[0].value, total=float(money(row[1]))) for row in payment_rows.all()]
+
+    average_transaction = money(net_sales / transactions) if transactions else Decimal("0")
+
+    return SalesReport(
+        gross_sales=float(gross_sales),
+        discounts=float(discounts),
+        tax=float(tax),
+        net_sales=float(net_sales),
+        refund_amount=float(refund_amount),
+        transactions=transactions,
+        units_sold=units_sold,
+        average_transaction=float(average_transaction),
+        payment_breakdown=payment_breakdown,
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
+async def build_inventory_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> InventoryReport:
+    products_result = await db.execute(
+        select(Product.id, Product.name, Product.current_stock, Product.cost_price, Product.low_stock_alert)
+        .where(Product.organization_id == organization_id, Product.is_active.is_(True))
+    )
+    products = products_result.all()
+
+    total_stock_value = money(sum((row.current_stock * row.cost_price for row in products), Decimal("0")))
+    low_stock_count = sum(1 for row in products if row.low_stock_alert is not None and row.current_stock < row.low_stock_alert)
+    out_of_stock_count = sum(1 for row in products if row.current_stock <= 0)
+
+    sale_conditions = _sale_conditions(organization_id, filters)
+    movement_rows = await db.execute(
+        select(SaleItem.product_id, func.sum(SaleItem.quantity), func.sum(SaleItem.line_total))
+        .select_from(SaleItem)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(*sale_conditions)
+        .group_by(SaleItem.product_id)
+    )
+    movement_by_product = {row[0]: (int(row[1]), money(row[2])) for row in movement_rows.all()}
+
+    summaries = [
+        ProductMovementSummary(
+            product_id=row.id,
+            product_name=row.name,
+            units_sold=movement_by_product.get(row.id, (0, Decimal("0")))[0],
+            revenue=float(movement_by_product.get(row.id, (0, Decimal("0")))[1]),
+        )
+        for row in products
+    ]
+    fast_movers = sorted(summaries, key=lambda s: s.units_sold, reverse=True)[:5]
+    slow_movers = sorted(summaries, key=lambda s: s.units_sold)[:5]
+
+    return InventoryReport(
+        total_stock_value=float(total_stock_value),
+        low_stock_count=low_stock_count,
+        out_of_stock_count=out_of_stock_count,
+        fast_movers=fast_movers,
+        slow_movers=slow_movers,
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
+async def build_customer_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> CustomerReport:
+    total_customers = (
+        await db.execute(select(func.count(Customer.id)).where(Customer.organization_id == organization_id, Customer.is_active.is_(True)))
+    ).scalar_one()
+
+    new_customers_conditions = [Customer.organization_id == organization_id]
+    if filters.start_date:
+        new_customers_conditions.append(Customer.created_at >= filters.start_date)
+    if filters.end_date:
+        new_customers_conditions.append(Customer.created_at <= filters.end_date)
+    new_customers = (await db.execute(select(func.count(Customer.id)).where(*new_customers_conditions))).scalar_one()
+
+    sale_conditions = _sale_conditions(organization_id, filters)
+    top_rows = await db.execute(
+        select(Customer.id, Customer.name, func.sum(Sale.total_amount), func.count(Sale.id))
+        .select_from(Sale)
+        .join(Customer, Customer.id == Sale.customer_id)
+        .where(*sale_conditions)
+        .group_by(Customer.id, Customer.name)
+        .order_by(func.sum(Sale.total_amount).desc())
+        .limit(5)
+    )
+    top_customers = [
+        CustomerSpend(customer_id=row[0], customer_name=row[1], total_spent=float(money(row[2])), transactions=int(row[3]))
+        for row in top_rows.all()
+    ]
+
+    debt_conditions = [Debt.organization_id == organization_id, Debt.cleared.is_(False)]
+    if filters.customer_id:
+        debt_conditions.append(Debt.customer_id == filters.customer_id)
+    total_outstanding = money(
+        (await db.execute(select(func.coalesce(func.sum(Debt.balance), 0)).where(*debt_conditions))).scalar_one()
+    )
+
+    return CustomerReport(
+        total_customers=total_customers,
+        new_customers=new_customers,
+        top_customers=top_customers,
+        total_outstanding_receivables=float(total_outstanding),
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
+async def build_supplier_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> SupplierReport:
+    conditions = [Purchase.organization_id == organization_id, Purchase.status == PurchaseStatus.COMPLETED]
+    if filters.start_date:
+        conditions.append(Purchase.created_at >= filters.start_date)
+    if filters.end_date:
+        conditions.append(Purchase.created_at <= filters.end_date)
+
+    rows = await db.execute(
+        select(Purchase.supplier_id, Supplier.name, func.sum(Purchase.total_amount), func.count(Purchase.id))
+        .select_from(Purchase)
+        .outerjoin(Supplier, Supplier.id == Purchase.supplier_id)
+        .where(*conditions)
+        .group_by(Purchase.supplier_id, Supplier.name)
+        .order_by(func.sum(Purchase.total_amount).desc())
+    )
+    suppliers = [
+        SupplierPurchaseSummary(
+            supplier_id=row[0], supplier_name=row[1] or "No supplier", total_purchased=float(money(row[2])), purchase_count=int(row[3])
+        )
+        for row in rows.all()
+    ]
+
+    return SupplierReport(suppliers=suppliers, generated_at=datetime.now(timezone.utc))
+
+
+async def build_debt_aging_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> DebtAgingReport:
+    conditions = [Debt.organization_id == organization_id, Debt.cleared.is_(False)]
+    if filters.customer_id:
+        conditions.append(Debt.customer_id == filters.customer_id)
+
+    result = await db.execute(select(Debt.created_at, Debt.balance).where(*conditions))
+    rows = result.all()
+
+    now = datetime.now(timezone.utc)
+    buckets = {"0-30 days": [0, Decimal("0")], "31-60 days": [0, Decimal("0")], "61-90 days": [0, Decimal("0")], "90+ days": [0, Decimal("0")]}
+
+    for created_at, balance in rows:
+        age_days = (now - created_at).days
+        if age_days <= 30:
+            key = "0-30 days"
+        elif age_days <= 60:
+            key = "31-60 days"
+        elif age_days <= 90:
+            key = "61-90 days"
+        else:
+            key = "90+ days"
+        buckets[key][0] += 1
+        buckets[key][1] += balance
+
+    bucket_list = [DebtAgingBucket(label=label, count=count, amount=float(money(amount))) for label, (count, amount) in buckets.items()]
+    total_outstanding = money(sum((amount for _, amount in buckets.values()), Decimal("0")))
+
+    return DebtAgingReport(buckets=bucket_list, total_outstanding=float(total_outstanding), generated_at=datetime.now(timezone.utc))
