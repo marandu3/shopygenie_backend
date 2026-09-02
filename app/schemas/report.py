@@ -183,3 +183,24 @@ class ParetoLine(BaseModel):
 class ParetoReport(BaseModel):
     lines: list[ParetoLine]
     generated_at: datetime
+
+
+class SalesPowerPoint(BaseModel):
+    timestamp: datetime
+    value: float
+
+
+class SalesPowerReport(BaseModel):
+    """MASTER PROMPT §54 — a real scatter dataset plus analytical
+    interpretation, not a decorative chart."""
+
+    points: list[SalesPowerPoint]
+    trend_start_value: float | None
+    trend_end_value: float | None
+    trend_direction: str  # "growing" | "declining" | "flat" | "insufficient_data"
+    peak_value: float | None
+    peak_timestamp: datetime | None
+    weakest_value: float | None
+    weakest_timestamp: datetime | None
+    volatility: float  # standard deviation of individual sale values
+    growth_percent: float | None  # second half of the period vs first half

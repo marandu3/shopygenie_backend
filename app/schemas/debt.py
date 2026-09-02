@@ -17,6 +17,7 @@ class DebtPaymentOut(ORMModel):
     amount: float
     method: str
     reference: str | None
+    received_by: uuid.UUID
     created_at: datetime
 
 
@@ -30,3 +31,22 @@ class DebtOut(ORMModel):
     due_date: date | None
     payments: list[DebtPaymentOut] = []
     created_at: datetime
+
+
+class SendDebtRemindersRequest(BaseModel):
+    debt_ids: list[uuid.UUID] = Field(default_factory=list, description="Empty = every unpaid, overdue debt")
+
+
+class DebtReminderResult(BaseModel):
+    debt_id: uuid.UUID
+    customer_name: str
+    recipient: str | None
+    sent: bool
+    error: str | None
+
+
+class SendDebtRemindersResponse(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    results: list[DebtReminderResult]

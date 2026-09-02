@@ -7,14 +7,21 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import AuthContext, require_permission, require_tenant_context
 from app.core.exceptions import NotFoundError
-from app.core.permissions import WORKERS_INVITE, WORKERS_SUSPEND, WORKERS_UPDATE
+from app.core.permissions import ROLES_MANAGE, WORKERS_INVITE, WORKERS_SUSPEND, WORKERS_UPDATE
 from app.db.session import get_db
+from app.models.billing import SmsMessageType
 from app.models.organization import Organization
-from app.models.user import Role, RolePermission, User, WorkerStatus
-from app.schemas.user import RoleOut, WorkerInvite, WorkerOut, WorkerUpdate
+from app.models.user import Permission, Role, RolePermission, User, WorkerStatus
+from app.schemas.user import PermissionOut, RoleCreate, RoleOut, RoleUpdate, WorkerInvite, WorkerOut, WorkerUpdate
 from app.services.notifications import send_sms
-from app.services.usage import increment_usage
-from app.services.workers import build_invitation_sms, invite_worker, set_worker_status
+from app.services.workers import (
+    build_invitation_sms,
+    create_custom_role,
+    delete_custom_role,
+    invite_worker,
+    set_worker_status,
+    update_custom_role,
+)
 
 router = APIRouter(prefix="/workers", tags=["Workers"])
 
@@ -33,6 +40,46 @@ async def list_roles(ctx: AuthContext = Depends(require_tenant_context), db: Asy
     for role in roles:
         out.append(RoleOut(id=role.id, name=role.name, is_system=role.is_system, permissions=[rp.permission.code for rp in role.permissions]))
     return out
+
+
+@router.get("/permissions", response_model=list[PermissionOut])
+async def list_permissions(ctx: AuthContext = Depends(require_tenant_context), db: AsyncSession = Depends(get_db)):
+    """Full permission catalog, for building a custom-role checkbox UI
+    (MASTER PROMPT §42)."""
+    result = await db.execute(select(Permission).order_by(Permission.code))
+    return list(result.scalars())
+
+
+@router.post("/roles", response_model=RoleOut, status_code=201)
+async def create_role_endpoint(
+    payload: RoleCreate, ctx: AuthContext = Depends(require_permission(ROLES_MANAGE)), db: AsyncSession = Depends(get_db)
+):
+    org_id = ctx.require_organization_id()
+    role = await create_custom_role(db, organization_id=org_id, actor_id=ctx.user_id, payload=payload)
+    await db.commit()
+    return RoleOut(id=role.id, name=role.name, is_system=role.is_system, permissions=[rp.permission.code for rp in role.permissions])
+
+
+@router.put("/roles/{role_id}", response_model=RoleOut)
+async def update_role_endpoint(
+    role_id: uuid.UUID,
+    payload: RoleUpdate,
+    ctx: AuthContext = Depends(require_permission(ROLES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    org_id = ctx.require_organization_id()
+    role = await update_custom_role(db, organization_id=org_id, role_id=role_id, actor_id=ctx.user_id, payload=payload)
+    await db.commit()
+    return RoleOut(id=role.id, name=role.name, is_system=role.is_system, permissions=[rp.permission.code for rp in role.permissions])
+
+
+@router.delete("/roles/{role_id}", status_code=204)
+async def delete_role_endpoint(
+    role_id: uuid.UUID, ctx: AuthContext = Depends(require_permission(ROLES_MANAGE)), db: AsyncSession = Depends(get_db)
+):
+    org_id = ctx.require_organization_id()
+    await delete_custom_role(db, organization_id=org_id, role_id=role_id, actor_id=ctx.user_id)
+    await db.commit()
 
 
 @router.post("", response_model=WorkerOut, status_code=201)
@@ -54,11 +101,15 @@ async def invite_worker_endpoint(
             business_name=org.name, worker_name=worker.full_name, email=worker.email, temporary_password=temporary_password
         )
         # Fire-and-forget: never make the invite request wait on SMS delivery (MASTER PROMPT §41).
-        background_tasks.add_task(send_sms, to=worker.phone, message=message)
-        # SMS stays unlimited while the subscription is active but is still
-        # counted for transparency (MASTER PROMPT §63).
-        await increment_usage(db, organization_id=org_id, metric="sms_messages")
-        await db.commit()
+        # send_sms opens its own DB session and logs the attempt + counts usage itself.
+        background_tasks.add_task(
+            send_sms,
+            organization_id=org_id,
+            to=worker.phone,
+            message=message,
+            message_type=SmsMessageType.WORKER_INVITE,
+            sent_by=ctx.user_id,
+        )
 
     return worker
 

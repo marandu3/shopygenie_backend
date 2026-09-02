@@ -1,6 +1,6 @@
 from app.models.account_request import TenantAccountRequest
 from app.models.audit import AuditLog
-from app.models.billing import ActivationRequest
+from app.models.billing import ActivationRequest, BillingPlanConfig, SmsMessage
 from app.models.counter import DocumentCounter
 from app.models.customer import Customer
 from app.models.debt import Debt, DebtPayment
@@ -24,6 +24,8 @@ __all__ = [
     "TenantAccountRequest",
     "AuditLog",
     "ActivationRequest",
+    "BillingPlanConfig",
+    "SmsMessage",
     "DocumentCounter",
     "Customer",
     "Debt",

@@ -45,3 +45,34 @@ class SubscriptionStatusOut(BaseModel):
     subscription_status: str
     subscription_plan: str | None
     subscription_expires_at: datetime | None
+
+
+class BillingPlanOut(ORMModel):
+    """MASTER PROMPT §61: names/descriptions/prices/quotas are configurable
+    by Platform Owners — this is the public shape shown on pricing pages."""
+
+    id: uuid.UUID
+    code: SubscriptionPlan
+    display_name: str
+    description: str
+    price_monthly: float
+    currency: str
+    max_branches: int | None
+    max_workers: int | None
+    whatsapp_quota_monthly: int | None
+    storage_quota_mb: int | None
+    is_active: bool
+    sort_order: int
+
+
+class BillingPlanUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    price_monthly: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    max_branches: int | None = Field(default=None, ge=0)
+    max_workers: int | None = Field(default=None, ge=0)
+    whatsapp_quota_monthly: int | None = Field(default=None, ge=0)
+    storage_quota_mb: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+    sort_order: int | None = None

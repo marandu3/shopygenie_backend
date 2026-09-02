@@ -11,7 +11,8 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.core.rate_limit import login_rate_limiter
 from app.core.security import hash_password
-from app.db.session import get_db
+from app.db.base import AsyncSessionLocal
+from app.db.session import get_db, set_session_factory
 from app.main import app
 from app.models.inventory import InventoryMovement, MovementType
 from app.models.organization import Branch, Organization, Register
@@ -57,11 +58,17 @@ async def db():
             yield s
 
     app.dependency_overrides[get_db] = override_get_db
+    # Background tasks (e.g. app/services/notifications.send_sms) can't go
+    # through Depends()/dependency_overrides — they need this test's
+    # loop-bound engine too, or asyncpg blows up trying to use a connection
+    # from a different test's (closed) event loop.
+    set_session_factory(session_factory)
 
     async with session_factory() as session:
         yield session
 
     app.dependency_overrides.pop(get_db, None)
+    set_session_factory(AsyncSessionLocal)
     await engine.dispose()
 
 
@@ -174,3 +181,29 @@ async def login(client: AsyncClient, email: str, password: str) -> str:
 
 def auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+async def build_second_tenant(db) -> tuple[str, str]:
+    """A minimal second, fully independent org — for tenant-isolation tests
+    that need "some other tenant" without the full `tenant` fixture's
+    products/customer scaffolding. Returns (owner_email, owner_password)."""
+    suffix = uuid.uuid4().hex[:8]
+    result = await db.execute(select(Role).where(Role.organization_id.is_(None), Role.name == "Tenant Owner"))
+    owner_role = result.scalar_one()
+
+    org = Organization(name=f"Other Shop {suffix}", slug=f"other-shop-{suffix}")
+    db.add(org)
+    await db.flush()
+    branch = Branch(organization_id=org.id, name="Main")
+    db.add(branch)
+    await db.flush()
+
+    password = "OtherPass123!"
+    owner = User(
+        organization_id=org.id, branch_id=branch.id, role_id=owner_role.id,
+        full_name="Other Owner", email=f"other-owner-{suffix}@shopygenie-tests.dev",
+        hashed_password=hash_password(password), status=WorkerStatus.ACTIVE, must_change_password=False,
+    )
+    db.add(owner)
+    await db.commit()
+    return owner.email, password

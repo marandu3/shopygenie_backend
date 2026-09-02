@@ -42,3 +42,19 @@ class RoleOut(ORMModel):
     name: str
     is_system: bool
     permissions: list[str] = []
+
+
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    permissions: list[str] | None = None
+
+
+class PermissionOut(ORMModel):
+    id: uuid.UUID
+    code: str
+    description: str

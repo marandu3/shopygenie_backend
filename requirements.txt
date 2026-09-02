@@ -19,6 +19,7 @@ python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.20
+cryptography==50.0.1
 
 # --- HTTP / misc ---
 httpx==0.28.1

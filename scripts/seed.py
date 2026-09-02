@@ -20,9 +20,10 @@ from app.core.config import get_settings
 from app.core.permissions import ALL_PERMISSIONS, SYSTEM_ROLE_PERMISSIONS
 from app.core.security import hash_password
 from app.db.base import AsyncSessionLocal
+from app.models.billing import BillingPlanConfig
 from app.models.customer import Customer
 from app.models.inventory import InventoryMovement, MovementType
-from app.models.organization import Branch, Organization, Register, SubscriptionStatus
+from app.models.organization import Branch, Organization, Register, SubscriptionPlan, SubscriptionStatus
 from app.models.product import Category, Product
 from app.models.supplier import Supplier
 from app.models.user import Permission, Role, RolePermission, User, WorkerStatus
@@ -200,11 +201,33 @@ async def seed_demo_tenant(db, roles: dict[str, Role]) -> None:
     print(f"  Cashier login:      {cashier.email} / DemoCashier123!")
 
 
+async def seed_billing_plans(db) -> None:
+    """MASTER PROMPT §61 — one editable catalog row per SubscriptionPlan
+    code. Only creates missing rows; never overwrites a platform owner's
+    edits on a re-run."""
+    defaults = [
+        dict(code=SubscriptionPlan.BASIC, display_name="Basic", description="For a single shop just getting started.",
+             price_monthly=Decimal("15000"), max_branches=1, max_workers=3, whatsapp_quota_monthly=50, storage_quota_mb=200, sort_order=1),
+        dict(code=SubscriptionPlan.PROFESSIONAL, display_name="Professional", description="Growing shops with a small team across a couple of branches.",
+             price_monthly=Decimal("35000"), max_branches=3, max_workers=10, whatsapp_quota_monthly=200, storage_quota_mb=1000, sort_order=2),
+        dict(code=SubscriptionPlan.BUSINESS, display_name="Business", description="Multi-branch businesses that need full analytics and transfers.",
+             price_monthly=Decimal("75000"), max_branches=10, max_workers=30, whatsapp_quota_monthly=1000, storage_quota_mb=5000, sort_order=3),
+        dict(code=SubscriptionPlan.ENTERPRISE, display_name="Enterprise", description="Unlimited scale, priority support.",
+             price_monthly=Decimal("150000"), max_branches=None, max_workers=None, whatsapp_quota_monthly=None, storage_quota_mb=None, sort_order=4),
+    ]
+    for defaults_row in defaults:
+        result = await db.execute(select(BillingPlanConfig).where(BillingPlanConfig.code == defaults_row["code"]))
+        if result.scalar_one_or_none() is None:
+            db.add(BillingPlanConfig(**defaults_row))
+    await db.flush()
+
+
 async def main() -> None:
     async with AsyncSessionLocal() as db:
         roles = await seed_permissions_and_roles(db)
         await seed_platform_owner(db)
         await seed_demo_tenant(db, roles)
+        await seed_billing_plans(db)
         await db.commit()
     print("Seed complete.")
 

@@ -7,6 +7,17 @@ class UsageMetricOut(BaseModel):
     count: int
 
 
+class QuotaOut(BaseModel):
+    used: int
+    quota: int | None  # None = unlimited
+    remaining: int | None
+    percentage: float | None
+    exhausted: bool
+    warning: bool
+
+
 class UsageSummaryOut(BaseModel):
     period: str
     metrics: list[UsageMetricOut]
+    whatsapp: QuotaOut
+    storage_bytes: QuotaOut

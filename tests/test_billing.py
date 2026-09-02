@@ -7,12 +7,12 @@ async def test_owner_can_submit_and_list_own_activation_requests(client, tenant)
     resp = await client.post(
         "/api/v1/billing/activation-requests",
         headers=auth_headers(token),
-        json={"plan_requested": "STANDARD", "reference_number": "MPESA-XYZ-001", "note": "Paid via M-Pesa"},
+        json={"plan_requested": "PROFESSIONAL", "reference_number": "MPESA-XYZ-001", "note": "Paid via M-Pesa"},
     )
     assert resp.status_code == 201
     body = resp.json()
     assert body["status"] == "PENDING"
-    assert body["plan_requested"] == "STANDARD"
+    assert body["plan_requested"] == "PROFESSIONAL"
 
     listed = await client.get("/api/v1/billing/activation-requests", headers=auth_headers(token))
     assert listed.status_code == 200
@@ -35,7 +35,7 @@ async def test_platform_owner_approves_activation_request_and_activates_org(clie
     submit = await client.post(
         "/api/v1/billing/activation-requests",
         headers=auth_headers(owner_token),
-        json={"plan_requested": "PREMIUM", "reference_number": "BANK-REF-777"},
+        json={"plan_requested": "BUSINESS", "reference_number": "BANK-REF-777"},
     )
     request_id = submit.json()["id"]
 
@@ -61,7 +61,7 @@ async def test_platform_owner_approves_activation_request_and_activates_org(clie
     assert status_resp.status_code == 200
     body = status_resp.json()
     assert body["subscription_status"] == "ACTIVE"
-    assert body["subscription_plan"] == "PREMIUM"
+    assert body["subscription_plan"] == "BUSINESS"
     assert body["subscription_expires_at"] is not None
 
     # Cannot review the same request twice.

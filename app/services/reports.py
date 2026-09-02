@@ -29,6 +29,8 @@ from app.schemas.report import (
     PaymentMethodTotal,
     ProductMovementSummary,
     ReportFilters,
+    SalesPowerPoint,
+    SalesPowerReport,
     SalesReport,
     SupplierPurchaseSummary,
     SupplierReport,
@@ -532,3 +534,74 @@ async def build_pareto_report(db: AsyncSession, *, organization_id: uuid.UUID, f
         )
 
     return ParetoReport(lines=lines, generated_at=datetime.now(timezone.utc))
+
+
+async def build_sales_power_report(db: AsyncSession, *, organization_id: uuid.UUID, filters: ReportFilters) -> SalesPowerReport:
+    """MASTER PROMPT §54: individual sale observations as a real scatter
+    dataset, plus a genuine trend/volatility/growth interpretation — never
+    just a decorative chart."""
+    sale_conditions = _sale_conditions(organization_id, filters)
+    result = await db.execute(select(Sale.created_at, Sale.total_amount).where(*sale_conditions).order_by(Sale.created_at))
+    rows = result.all()
+
+    points = [SalesPowerPoint(timestamp=ts, value=float(money(val))) for ts, val in rows]
+    if not points:
+        return SalesPowerReport(
+            points=[], trend_start_value=None, trend_end_value=None, trend_direction="insufficient_data",
+            peak_value=None, peak_timestamp=None, weakest_value=None, weakest_timestamp=None,
+            volatility=0.0, growth_percent=None,
+        )
+
+    values = [p.value for p in points]
+    n = len(values)
+
+    # Simple linear regression (x = point index) for the trend line's
+    # endpoints — enough to say "growing"/"declining" without pretending
+    # false statistical precision.
+    if n >= 2:
+        mean_x = (n - 1) / 2
+        mean_y = sum(values) / n
+        numerator = sum((i - mean_x) * (v - mean_y) for i, v in enumerate(values))
+        denominator = sum((i - mean_x) ** 2 for i in range(n))
+        slope = numerator / denominator if denominator else 0.0
+        intercept = mean_y - slope * mean_x
+        trend_start = intercept
+        trend_end = intercept + slope * (n - 1)
+        direction = "flat"
+        if trend_end > trend_start * 1.05:
+            direction = "growing"
+        elif trend_end < trend_start * 0.95:
+            direction = "declining"
+    else:
+        trend_start = trend_end = values[0]
+        direction = "insufficient_data"
+
+    mean_value = sum(values) / n
+    variance = sum((v - mean_value) ** 2 for v in values) / n
+    volatility = round(variance ** 0.5, 2)
+
+    peak_idx = max(range(n), key=lambda i: values[i])
+    weak_idx = min(range(n), key=lambda i: values[i])
+
+    growth_percent = None
+    if n >= 2:
+        half = n // 2
+        first_half = values[:half] or values[:1]
+        second_half = values[half:] or values[-1:]
+        first_avg = sum(first_half) / len(first_half)
+        second_avg = sum(second_half) / len(second_half)
+        if first_avg > 0:
+            growth_percent = round(((second_avg - first_avg) / first_avg) * 100, 1)
+
+    return SalesPowerReport(
+        points=points,
+        trend_start_value=round(trend_start, 2),
+        trend_end_value=round(trend_end, 2),
+        trend_direction=direction,
+        peak_value=values[peak_idx],
+        peak_timestamp=points[peak_idx].timestamp,
+        weakest_value=values[weak_idx],
+        weakest_timestamp=points[weak_idx].timestamp,
+        volatility=volatility,
+        growth_percent=growth_percent,
+    )

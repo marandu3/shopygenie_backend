@@ -1,6 +1,9 @@
+import csv
+import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
@@ -16,6 +19,7 @@ from app.schemas.report import (
     InventoryReport,
     ParetoReport,
     ReportFilters,
+    SalesPowerReport,
     SalesReport,
     SupplierReport,
     TimeSeriesReport,
@@ -31,6 +35,7 @@ from app.services.reports import (
     build_heatmap_report,
     build_inventory_report,
     build_pareto_report,
+    build_sales_power_report,
     build_sales_report,
     build_supplier_report,
     build_timeseries_report,
@@ -50,6 +55,34 @@ async def report_builder_endpoint(
     report/dashboard system yet — one query in, one result out."""
     org_id = ctx.require_organization_id()
     return await build_report(db, organization_id=org_id, request=payload)
+
+
+@router.post("/builder/export.csv")
+async def report_builder_export_csv(
+    payload: ReportBuilderRequest,
+    ctx: AuthContext = Depends(require_permission(REPORTS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    """MASTER PROMPT §121: report exports. Respects the same permission and
+    tenant scope as the JSON endpoint — an export is not a privilege
+    escalation path."""
+    org_id = ctx.require_organization_id()
+    report = await build_report(db, organization_id=org_id, request=payload)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["label", "value", "compare_value", "change_percent"])
+    for row in report.rows:
+        writer.writerow([row.label, row.value, row.compare_value, row.change_percent])
+    writer.writerow([])
+    writer.writerow(["total", report.total])
+    buffer.seek(0)
+
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=report_{report.metric}.csv"},
+    )
 
 
 @router.post("/summary", response_model=BusinessSummaryReport)
@@ -141,6 +174,16 @@ async def heatmap_report(
 ):
     org_id = ctx.require_organization_id()
     return await build_heatmap_report(db, organization_id=org_id, start=start_date, end=end_date)
+
+
+@router.post("/sales-power", response_model=SalesPowerReport)
+async def sales_power_report(
+    filters: ReportFilters = ReportFilters(),
+    ctx: AuthContext = Depends(require_permission(REPORTS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    org_id = ctx.require_organization_id()
+    return await build_sales_power_report(db, organization_id=org_id, filters=filters)
 
 
 @router.post("/pareto", response_model=ParetoReport)

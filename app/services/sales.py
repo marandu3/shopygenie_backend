@@ -279,6 +279,13 @@ async def create_sale(
     return result.scalar_one()
 
 
+def build_receipt_sms(*, business_name: str, customer_name: str, sale_number: str, total_amount: Decimal, currency: str) -> str:
+    return (
+        f"{business_name}: Thank you {customer_name}! Receipt for sale #{sale_number}: "
+        f"{currency} {total_amount}. We appreciate your business."
+    )
+
+
 async def void_sale(
     db: AsyncSession,
     *,

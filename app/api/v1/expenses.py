@@ -13,7 +13,9 @@ from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.permissions import EXPENSES_CREATE, EXPENSES_VIEW
 from app.db.session import get_db
 from app.models.expense import Expense, ExpenseCategory
+from app.models.organization import Organization
 from app.schemas.expense import ExpenseCategoryCreate, ExpenseCategoryOut, ExpenseCreate, ExpenseOut, ExpenseUpdate
+from app.services.usage import enforce_storage_quota
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
@@ -112,6 +114,12 @@ async def upload_expense_evidence(
     if len(contents) > settings.max_upload_bytes:
         raise ValidationAppError("File exceeds the maximum allowed size", code="FILE_TOO_LARGE")
 
+    org = await db.get(Organization, org_id)
+    # Previous evidence on this expense (if any) is about to be replaced —
+    # only the net new bytes count against the quota (MASTER PROMPT §64).
+    previous_size = expense.evidence_size_bytes or 0
+    await enforce_storage_quota(db, org, incoming_bytes=len(contents) - previous_size)
+
     # Tenant- and expense-isolated path — never a publicly guessable/servable URL.
     safe_name = f"{uuid.uuid4()}{os.path.splitext(file.filename or '')[1]}"
     directory = os.path.join(settings.uploads_dir, str(org_id), "expenses", str(expense_id))
@@ -122,6 +130,7 @@ async def upload_expense_evidence(
 
     expense.evidence_path = path
     expense.evidence_filename = file.filename
+    expense.evidence_size_bytes = len(contents)
     await db.commit()
     await db.refresh(expense)
     return expense

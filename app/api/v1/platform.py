@@ -9,7 +9,7 @@ from app.core.exceptions import NotFoundError
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.models.account_request import AccountRequestStatus
-from app.models.billing import ActivationRequestStatus
+from app.models.billing import ActivationRequestStatus, BillingPlanConfig, SmsMessageType
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.account_request import (
@@ -18,7 +18,13 @@ from app.schemas.account_request import (
     AccountRequestReview,
     TenantAccountRequestOut,
 )
-from app.schemas.billing import ActivationRequestAdminOut, ActivationRequestApprove, ActivationRequestReject
+from app.schemas.billing import (
+    ActivationRequestAdminOut,
+    ActivationRequestApprove,
+    ActivationRequestReject,
+    BillingPlanOut,
+    BillingPlanUpdate,
+)
 from app.schemas.common import Page
 from app.schemas.platform import (
     EnterTenantResponse,
@@ -34,7 +40,9 @@ from app.services.account_requests import (
 from app.services.audit import log_action
 from app.services.billing import approve_activation_request, platform_list_activation_requests, reject_activation_request
 from app.services.notifications import send_sms
+from app.schemas.platform_report import PlatformReportBuilderRequest, PlatformReportBuilderResult
 from app.services.platform import platform_kpis, provision_organization, set_organization_active
+from app.services.platform_report_builder import build_platform_report
 from app.services.workers import build_invitation_sms
 from app.models.account_request import TenantAccountRequest
 
@@ -97,7 +105,14 @@ async def create_organization(
         message = build_invitation_sms(
             business_name=org.name, worker_name=owner.full_name, email=owner.email, temporary_password=temporary_password
         )
-        background_tasks.add_task(send_sms, to=owner.phone, message=message)
+        background_tasks.add_task(
+            send_sms,
+            organization_id=org.id,
+            to=owner.phone,
+            message=message,
+            message_type=SmsMessageType.WORKER_INVITE,
+            sent_by=ctx.user_id,
+        )
 
     item = OrganizationAdminOut.model_validate(org, from_attributes=True)
     item.worker_count = 1
@@ -155,6 +170,54 @@ async def enter_tenant_mode(
 
     access_token = create_access_token(ctx.user_id, extra_claims={"act_org": str(organization_id)})
     return EnterTenantResponse(access_token=access_token, organization_id=organization_id, organization_name=org.name)
+
+
+@router.post("/reports/builder", response_model=PlatformReportBuilderResult)
+async def platform_report_builder_endpoint(
+    payload: PlatformReportBuilderRequest,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """MASTER PROMPT §60 — platform-level report engine, aggregate-only."""
+    return await build_platform_report(db, request=payload)
+
+
+@router.get("/billing-plans", response_model=list[BillingPlanOut])
+async def list_all_billing_plans(ctx: AuthContext = Depends(require_platform_owner), db: AsyncSession = Depends(get_db)):
+    """Includes inactive plans, unlike the public /billing/plans list."""
+    result = await db.execute(select(BillingPlanConfig).order_by(BillingPlanConfig.sort_order))
+    return list(result.scalars())
+
+
+@router.put("/billing-plans/{plan_id}", response_model=BillingPlanOut)
+async def update_billing_plan(
+    plan_id: uuid.UUID,
+    payload: BillingPlanUpdate,
+    ctx: AuthContext = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """MASTER PROMPT §61: plan name/description/price/quotas are configurable
+    by Platform Owners — the plan's `code` (BASIC/PROFESSIONAL/BUSINESS/
+    ENTERPRISE) is the stable identifier and is never editable here."""
+    plan = await db.get(BillingPlanConfig, plan_id)
+    if plan is None:
+        raise NotFoundError("Billing plan not found")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(plan, field, value)
+
+    await log_action(
+        db,
+        actor_user_id=ctx.user_id,
+        organization_id=None,
+        action="BILLING_PLAN_UPDATED",
+        resource_type="billing_plan",
+        resource_id=str(plan.id),
+        metadata={"code": plan.code.value},
+    )
+    await db.commit()
+    await db.refresh(plan)
+    return plan
 
 
 @router.get("/activation-requests", response_model=Page[ActivationRequestAdminOut])
@@ -256,6 +319,13 @@ async def approve_account_request_endpoint(
         message = build_invitation_sms(
             business_name=org.name, worker_name=owner.full_name, email=owner.email, temporary_password=temporary_password
         )
-        background_tasks.add_task(send_sms, to=owner.phone, message=message)
+        background_tasks.add_task(
+            send_sms,
+            organization_id=org.id,
+            to=owner.phone,
+            message=message,
+            message_type=SmsMessageType.WORKER_INVITE,
+            sent_by=ctx.user_id,
+        )
 
     return request

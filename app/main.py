@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1 import (
     account_requests,
@@ -29,6 +32,7 @@ from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.db.session import get_db
 
 settings = get_settings()
 configure_logging()
@@ -93,4 +97,17 @@ async def root():
 
 @app.get("/health")
 async def health():
+    """Liveness only — "the process is running." Never touches the
+    database, so it can't false-negative on a slow DB (MASTER PROMPT §109)."""
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready(db: AsyncSession = Depends(get_db)):
+    """Readiness — "can actually serve a request right now." Distinguishes
+    a running-but-DB-unreachable instance from a genuinely healthy one."""
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "not_ready"})

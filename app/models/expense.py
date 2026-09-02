@@ -40,3 +40,4 @@ class Expense(UUIDPKMixin, TenantScopedMixin, TimestampMixin, Base):
     # never a public URL; served back through an auth-checked endpoint.
     evidence_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     evidence_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    evidence_size_bytes: Mapped[int | None] = mapped_column(nullable=True)

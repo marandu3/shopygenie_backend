@@ -20,9 +20,14 @@ class SubscriptionStatus(str, enum.Enum):
 
 
 class SubscriptionPlan(str, enum.Enum):
+    """MASTER PROMPT §61: Basic / Professional / Business / Enterprise. The
+    code here is the stable identifier; display name/price/quotas for each
+    are configurable by a platform owner via BillingPlanConfig, not fixed."""
+
     BASIC = "BASIC"
-    STANDARD = "STANDARD"
-    PREMIUM = "PREMIUM"
+    PROFESSIONAL = "PROFESSIONAL"
+    BUSINESS = "BUSINESS"
+    ENTERPRISE = "ENTERPRISE"
 
 
 class Organization(UUIDPKMixin, TimestampMixin, Base):
@@ -56,6 +61,18 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
     subscription_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    # --- Tenant SMSGate configuration (MASTER PROMPT §43) ---
+    # Deliberately per-organization, never a shared/global credential. The
+    # API key is encrypted at rest (app/core/crypto.py) and never returned
+    # in plaintext by any endpoint.
+    sms_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    sms_base_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    sms_api_key_encrypted: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    sms_sender_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sms_last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sms_last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sms_last_test_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     branches: Mapped[list["Branch"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
 
