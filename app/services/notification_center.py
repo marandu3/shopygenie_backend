@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import NotFoundError
 from app.models.notification import Notification, NotificationRead, NotificationType
 
 
@@ -68,7 +69,20 @@ async def unread_count(db: AsyncSession, *, organization_id: uuid.UUID | None, u
     return result.scalar_one()
 
 
-async def mark_read(db: AsyncSession, *, notification_id: uuid.UUID, user_id: uuid.UUID) -> None:
+async def mark_read(
+    db: AsyncSession, *, notification_id: uuid.UUID, user_id: uuid.UUID, organization_id: uuid.UUID | None
+) -> None:
+    """organization_id is the CALLER's own scope (their org, or None for a
+    platform owner not in tenant mode) — never trust the client to say which
+    notification is "theirs" without checking it actually belongs to that
+    scope first (MASTER PROMPT — notification security §14). A mismatch (or
+    unknown id) looks identical to the caller: 404, not 403, so existence of
+    another tenant's notification is never confirmed."""
+    conditions = _scope_conditions(organization_id)
+    owned = await db.execute(select(Notification.id).where(Notification.id == notification_id, *conditions))
+    if owned.scalar_one_or_none() is None:
+        raise NotFoundError("Notification not found")
+
     existing = await db.execute(
         select(NotificationRead).where(
             NotificationRead.notification_id == notification_id, NotificationRead.user_id == user_id

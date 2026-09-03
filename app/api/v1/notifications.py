@@ -69,7 +69,8 @@ async def mark_notification_read(
     ctx: AuthContext = Depends(require_password_already_set),
     db: AsyncSession = Depends(get_db),
 ):
-    await mark_read(db, notification_id=notification_id, user_id=ctx.user_id)
+    org_id = _scope_org_id(ctx)
+    await mark_read(db, notification_id=notification_id, user_id=ctx.user_id, organization_id=org_id)
     await db.commit()
     return {"detail": "ok"}
 

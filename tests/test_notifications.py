@@ -1,4 +1,4 @@
-from tests.conftest import auth_headers, login
+from tests.conftest import auth_headers, build_second_tenant, login
 
 
 async def test_worker_invite_creates_org_notification(client, tenant):
@@ -83,3 +83,28 @@ async def test_tenant_cannot_see_platform_wide_notifications(client, tenant):
     # Every item must be scoped to this tenant's own org, never the platform-wide feed.
     for n in listed.json()["items"]:
         assert n["organization_id"] == str(tenant.org_id)
+
+
+async def test_tenant_cannot_mark_another_tenants_notification_read(client, tenant, db):
+    """MASTER PROMPT — notification security §14: ownership must be
+    enforced server-side. A user who somehow obtains another tenant's
+    notification id (e.g. by guessing a UUID) must not be able to write a
+    read-marker against it — the backend rejects it as not found, the same
+    response as a genuinely unknown id, so existence is never confirmed."""
+    owner_token = await login(client, tenant.owner_email, tenant.owner_password)
+
+    roles = await client.get("/api/v1/workers/roles", headers=auth_headers(owner_token))
+    cashier_role_id = next(r["id"] for r in roles.json() if r["name"] == "Cashier")
+    await client.post(
+        "/api/v1/workers",
+        headers=auth_headers(owner_token),
+        json={"full_name": "Cross Tenant Target", "email": f"cross-{tenant.org_id}@shopygenie-tests.dev", "role_id": cashier_role_id},
+    )
+    listed = await client.get("/api/v1/notifications", headers=auth_headers(owner_token))
+    notification_id = listed.json()["items"][0]["id"]
+
+    other_email, other_password = await build_second_tenant(db)
+    other_token = await login(client, other_email, other_password)
+
+    read_resp = await client.post(f"/api/v1/notifications/{notification_id}/read", headers=auth_headers(other_token))
+    assert read_resp.status_code == 404

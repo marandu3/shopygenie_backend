@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission, require_tenant_context
+from app.api.deps import AuthContext, PaginationParams, require_permission, require_tenant_context
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.permissions import SETTINGS_MANAGE
 from app.db.session import get_db
@@ -221,8 +221,7 @@ async def test_sms_config_endpoint(
 async def list_sms_history(
     ctx: AuthContext = Depends(require_permission(SETTINGS_MANAGE)),
     db: AsyncSession = Depends(get_db),
-    page: int = 1,
-    page_size: int = 25,
+    pagination: PaginationParams = Depends(),
 ):
     org_id = ctx.require_organization_id()
     conditions = [SmsMessage.organization_id == org_id]
@@ -231,7 +230,7 @@ async def list_sms_history(
         select(SmsMessage)
         .where(*conditions)
         .order_by(SmsMessage.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+        .offset(pagination.offset)
+        .limit(pagination.limit)
     )
-    return Page(items=list(result.scalars()), total=total, page=page, page_size=page_size)
+    return Page(items=list(result.scalars()), total=total, page=pagination.page, page_size=pagination.page_size)

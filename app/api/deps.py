@@ -142,9 +142,11 @@ async def require_tenant_context(ctx: AuthContext = Depends(require_password_alr
 
 class PaginationParams:
     """Server-side pagination (MASTER PROMPT §64) — never let a list endpoint
-    hand the whole table to the browser. page is 1-indexed."""
+    hand the whole table to the browser. page is 1-indexed. Global standard
+    is a hard cap of 10 records per page (MASTER PROMPT navigation/table UX
+    rework §15-16) — a client cannot request more via ?page_size=."""
 
-    def __init__(self, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200)):
+    def __init__(self, page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=10)):
         self.page = page
         self.page_size = page_size
 

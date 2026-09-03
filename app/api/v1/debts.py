@@ -41,7 +41,14 @@ async def list_debts(
         conditions.append(Debt.cleared.is_(False))
 
     result = await db.execute(
-        select(Debt).where(*conditions).options(selectinload(Debt.payments)).order_by(Debt.created_at.desc())
+        select(Debt)
+        .where(*conditions)
+        .options(selectinload(Debt.payments))
+        # Business-priority ordering (MASTER PROMPT — table UX rework §20):
+        # unpaid debts before paid/history, and within unpaid the soonest
+        # due date (i.e. most overdue) first. created_at is the deterministic
+        # tiebreaker (§21) so rows never jump between pages unpredictably.
+        .order_by(Debt.cleared.asc(), Debt.due_date.asc().nulls_last(), Debt.created_at.desc())
     )
     return list(result.scalars())
 
