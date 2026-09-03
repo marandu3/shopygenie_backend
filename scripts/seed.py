@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.crypto import encrypt_secret
 from app.core.permissions import ALL_PERMISSIONS, SYSTEM_ROLE_PERMISSIONS
 from app.core.security import hash_password
 from app.db.base import AsyncSessionLocal
@@ -201,6 +202,30 @@ async def seed_demo_tenant(db, roles: dict[str, Role]) -> None:
     print(f"  Cashier login:      {cashier.email} / DemoCashier123!")
 
 
+async def seed_demo_tenant_sms_config(db) -> None:
+    """Local-dev convenience: if real SMSGate credentials are set in .env,
+    apply them to the demo tenant so SMS can be tested end to end without
+    clicking through Settings > Notifications first. Runs every time (not
+    just on first seed) so re-running after editing .env picks up the new
+    values. Never touches any other organization — the live send path
+    (app/integrations/sms/factory.py) only ever reads per-tenant config."""
+    if not (settings.smsgate_username and settings.smsgate_password):
+        return
+
+    result = await db.execute(select(Organization).where(Organization.slug == "demo-shop"))
+    org = result.scalar_one_or_none()
+    if org is None:
+        return
+
+    org.sms_base_url = settings.smsgate_base_url or org.sms_base_url
+    org.sms_username = settings.smsgate_username
+    org.sms_password_encrypted = encrypt_secret(settings.smsgate_password)
+    org.sms_device_id = settings.smsgate_device_id or None
+    org.sms_enabled = True
+    await db.flush()
+    print(f"Applied SMSGate config from .env to '{org.name}'")
+
+
 async def seed_billing_plans(db) -> None:
     """MASTER PROMPT §61 — one editable catalog row per SubscriptionPlan
     code. Only creates missing rows; never overwrites a platform owner's
@@ -227,6 +252,7 @@ async def main() -> None:
         roles = await seed_permissions_and_roles(db)
         await seed_platform_owner(db)
         await seed_demo_tenant(db, roles)
+        await seed_demo_tenant_sms_config(db)
         await seed_billing_plans(db)
         await db.commit()
     print("Seed complete.")

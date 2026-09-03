@@ -44,7 +44,7 @@ Required variables (see `.env.example` for the full list with comments):
 | `JWT_SECRET_KEY` | Yes | 32+ random characters. The app refuses to start in production with a default/short secret. |
 | `CORS_ORIGINS` | Yes | Comma-separated. No `*` in production. |
 | `PLATFORM_OWNER_EMAIL` / `PLATFORM_OWNER_PASSWORD` / `PLATFORM_OWNER_NAME` | Yes | Bootstraps the initial platform owner account via `scripts/seed.py`. Equivalent to what other docs call `INITIAL_PLATFORM_OWNER_EMAIL`/`PASSWORD`. |
-| `SMSGATE_BASE_URL` / `SMSGATE_API_KEY` / `SMSGATE_SENDER_ID` | No | Leave blank to use the console-logging SMS stub. |
+| `SMSGATE_BASE_URL` / `SMSGATE_USERNAME` / `SMSGATE_PASSWORD` / `SMSGATE_DEVICE_ID` | No | Local-dev/seed convenience only — applied to the demo tenant by `scripts/seed.py`, never read by the live send path. Leave blank to use the console-logging SMS stub. Real tenants configure their own SMSGate account in Settings → Notifications. |
 | `UPLOADS_DIR` / `MAX_UPLOAD_BYTES` | No | Defaults are fine (`uploads`, 5MB). |
 | `ENVIRONMENT` | No | `development` locally; set to `production` only for a real deployment. |
 
@@ -232,7 +232,7 @@ Render PostgreSQL (managed)
 | `ENVIRONMENT` | **Required** | Set to `production` — this activates the startup guard against weak secrets and wildcard CORS. |
 | `CORS_ORIGINS` | **Required** | Your Netlify frontend's real URL(s), comma-separated. No `*`. |
 | `PLATFORM_OWNER_EMAIL` / `PLATFORM_OWNER_PASSWORD` / `PLATFORM_OWNER_NAME` | **Required** (first deploy) | Used once by `scripts/seed.py` to bootstrap the initial platform owner. Use a real, strong password — set via Render's dashboard, never in Git. |
-| `SMSGATE_BASE_URL` / `SMSGATE_API_KEY` / `SMSGATE_SENDER_ID` | Optional | Platform-wide default only if you choose to set one; tenants normally configure their own in Settings → Notifications. |
+| `SMSGATE_BASE_URL` / `SMSGATE_USERNAME` / `SMSGATE_PASSWORD` / `SMSGATE_DEVICE_ID` | Optional | Applied only to the seeded demo tenant if set; not read by the live per-tenant send path. Real tenants configure their own SMSGate account in Settings → Notifications. |
 | `UPLOADS_DIR` | Optional | Defaults to `uploads`. **Note:** Render's filesystem is ephemeral on redeploy — for durable expense-evidence storage in production, mount a Render Disk at this path, or migrate to object storage later. Not wired to S3/etc. in this codebase yet. |
 | `MAX_UPLOAD_BYTES` | Optional | Defaults to 5MB. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS` | Optional | Sensible defaults already set. |

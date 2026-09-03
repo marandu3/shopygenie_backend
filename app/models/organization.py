@@ -63,13 +63,16 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     # --- Tenant SMSGate configuration (MASTER PROMPT §43) ---
-    # Deliberately per-organization, never a shared/global credential. The
-    # API key is encrypted at rest (app/core/crypto.py) and never returned
-    # in plaintext by any endpoint.
+    # Deliberately per-organization, never a shared/global credential.
+    # SMSGate (sms-gate.app) auths with HTTP Basic (username/password)
+    # against a specific Android device_id. The password is encrypted at
+    # rest (app/core/crypto.py) and never returned in plaintext by any
+    # endpoint; username/device_id aren't secret, so they're stored plain.
     sms_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     sms_base_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    sms_api_key_encrypted: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    sms_sender_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sms_username: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sms_password_encrypted: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    sms_device_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sms_last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sms_last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sms_last_test_error: Mapped[str | None] = mapped_column(String(500), nullable=True)

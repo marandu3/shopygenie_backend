@@ -8,16 +8,18 @@ from app.schemas.common import ORMModel
 
 class SmsConfigUpdate(BaseModel):
     base_url: str | None = Field(default=None, max_length=300)
-    api_key: str | None = Field(default=None, min_length=1, max_length=500)
-    sender_id: str | None = Field(default=None, max_length=50)
+    username: str | None = Field(default=None, max_length=200)
+    password: str | None = Field(default=None, min_length=1, max_length=500)
+    device_id: str | None = Field(default=None, max_length=100)
     enabled: bool | None = None
 
 
 class SmsConfigOut(BaseModel):
     enabled: bool
     base_url: str | None
-    sender_id: str | None
-    api_key_masked: str | None
+    username: str | None
+    device_id: str | None
+    password_masked: str | None
     last_tested_at: datetime | None
     last_test_status: str | None
     last_test_error: str | None

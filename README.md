@@ -113,7 +113,7 @@ cp .env.example .env
 | `JWT_SECRET_KEY` | Yes | 32+ random characters. Refuses to boot in production with a default/short value. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `CORS_ORIGINS` | Yes | Comma-separated origins allowed to call the API. `http://localhost:4200` for local frontend dev |
 | `PLATFORM_OWNER_EMAIL` / `PLATFORM_OWNER_PASSWORD` / `PLATFORM_OWNER_NAME` | Yes | Bootstraps the one initial platform-owner account, via `scripts/seed.py`. Idempotent — running the seed again doesn't reset the password |
-| `SMSGATE_BASE_URL` / `SMSGATE_API_KEY` / `SMSGATE_SENDER_ID` | No | Leave blank to use the console-logging SMS stub — worker invites and OTPs just print to the backend log instead of sending real SMS |
+| `SMSGATE_BASE_URL` / `SMSGATE_USERNAME` / `SMSGATE_PASSWORD` / `SMSGATE_DEVICE_ID` | No | Local-dev/seed convenience only — applied to the demo tenant by `scripts/seed.py`. Leave blank to use the console-logging SMS stub. Real tenants configure SMSGate per-organization in Settings → Notifications (never a global credential) |
 | `UPLOADS_DIR` / `MAX_UPLOAD_BYTES` | No | Defaults: `uploads`, 5MB. Where expense-evidence files are stored on disk |
 | `ENVIRONMENT` | No | `development` locally; `production` only for a real deployment (activates stricter startup checks) |
 

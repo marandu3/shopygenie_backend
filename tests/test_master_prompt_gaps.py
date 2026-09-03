@@ -241,13 +241,13 @@ async def test_sms_config_update_test_send_and_history(client, tenant):
     updated = await client.put(
         "/api/v1/organizations/me/sms-config",
         headers=auth_headers(token),
-        json={"base_url": "https://smsgate.example.com", "api_key": "super-secret-key-123", "sender_id": "SHOPYGENIE", "enabled": True},
+        json={"base_url": "https://smsgate.example.com", "username": "shopowner", "password": "super-secret-pass-123", "device_id": "abc123", "enabled": True},
     )
     assert updated.status_code == 200
     body = updated.json()
     assert body["enabled"] is True
-    assert body["api_key_masked"].endswith("-123")
-    assert "super-secret-key-123" not in updated.text  # never returned in plaintext
+    assert body["password_masked"].endswith("-123")
+    assert "super-secret-pass-123" not in updated.text  # never returned in plaintext
 
     # No real SMSGate credentials exist, so this exercises the failure path
     # of a real (attempted) network call, not the console stub — either way

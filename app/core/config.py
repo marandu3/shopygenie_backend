@@ -21,9 +21,15 @@ class Settings(BaseSettings):
     platform_owner_password: str = "change-me"
     platform_owner_name: str = "Platform Owner"
 
+    # Local-dev/seed convenience only — never read by the live send path
+    # (app/integrations/sms/factory.get_sms_provider), which is strictly
+    # per-organization (MASTER PROMPT §43). When set, scripts/seed.py
+    # applies these to the demo tenant so SMS can be tested immediately
+    # without clicking through Settings → Notifications first.
     smsgate_base_url: str = ""
-    smsgate_api_key: str = ""
-    smsgate_sender_id: str = ""
+    smsgate_username: str = ""
+    smsgate_password: str = ""
+    smsgate_device_id: str = ""
 
     uploads_dir: str = "uploads"
     max_upload_bytes: int = 5 * 1024 * 1024

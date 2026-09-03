@@ -38,7 +38,9 @@ services:
         sync: false
       - key: SMSGATE_BASE_URL
         sync: false
-      - key: SMSGATE_API_KEY
+      - key: SMSGATE_USERNAME
         sync: false
-      - key: SMSGATE_SENDER_ID
+      - key: SMSGATE_PASSWORD
+        sync: false
+      - key: SMSGATE_DEVICE_ID
         sync: false

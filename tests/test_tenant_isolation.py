@@ -114,10 +114,10 @@ async def test_cross_tenant_sms_config_is_isolated(client, tenant, db):
     configured = await client.put(
         "/api/v1/organizations/me/sms-config",
         headers=auth_headers(token_a),
-        json={"base_url": "https://smsgate.example.com", "api_key": "tenant-a-secret-key", "sender_id": "SHOPA", "enabled": True},
+        json={"base_url": "https://smsgate.example.com", "username": "tenant-a", "password": "tenant-a-secret-key", "device_id": "SHOPA", "enabled": True},
     )
     assert configured.status_code == 200
-    assert configured.json()["api_key_masked"].endswith("-key")
+    assert configured.json()["password_masked"].endswith("-key")
     assert "tenant-a-secret-key" not in configured.text
 
     config_b = await client.get("/api/v1/organizations/me/sms-config", headers=auth_headers(token_b))

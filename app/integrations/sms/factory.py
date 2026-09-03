@@ -10,12 +10,13 @@ def get_sms_provider(organization: Organization) -> SMSProvider:
     credential for all tenants"). Falls back to a console-logging stub when
     the tenant hasn't configured/enabled SMSGate yet — never a shared
     platform-wide credential."""
-    if organization.sms_enabled and organization.sms_base_url and organization.sms_api_key_encrypted:
-        api_key = decrypt_secret(organization.sms_api_key_encrypted)
-        if api_key:
+    if organization.sms_enabled and organization.sms_base_url and organization.sms_username and organization.sms_password_encrypted:
+        password = decrypt_secret(organization.sms_password_encrypted)
+        if password:
             return SMSGateProvider(
                 base_url=organization.sms_base_url,
-                api_key=api_key,
-                sender_id=organization.sms_sender_id or "",
+                username=organization.sms_username,
+                password=password,
+                device_id=organization.sms_device_id,
             )
     return ConsoleSMSProvider()

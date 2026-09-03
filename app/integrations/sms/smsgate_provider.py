@@ -8,28 +8,28 @@ logger = logging.getLogger("shopygenie")
 
 
 class SMSGateProvider(SMSProvider):
-    """Real adapter for the SMSGate API.
-
-    NOTE: the exact request/response shape below is a reasonable default
-    (bearer auth, JSON body of {to, message, sender_id}) but has not been
-    verified against SMSGate's actual API docs/credentials — verify the
-    endpoint path and payload field names against your SMSGate account
-    before relying on this in production, then adjust `_build_request`.
+    """Adapter for SMSGate (sms-gate.app) — an Android-phone-as-SMS-gateway
+    service. Auths with HTTP Basic (username/password created in the
+    SMSGate app or its cloud console) and targets one specific registered
+    device by device_id. Endpoint/payload shape follows the documented
+    3rdparty API (POST {base_url}/message, base_url typically ending in
+    .../3rdparty/v1) — verify against your account if SMSGate changes it.
     """
 
-    def __init__(self, base_url: str, api_key: str, sender_id: str):
+    def __init__(self, base_url: str, username: str, password: str, device_id: str | None = None):
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
-        self._sender_id = sender_id
+        self._auth = httpx.BasicAuth(username, password)
+        self._device_id = device_id or None
 
     async def send(self, *, to: str, message: str) -> SMSSendResult:
-        url = f"{self._base_url}/messages"
-        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
-        payload = {"to": to, "message": message, "sender_id": self._sender_id}
+        url = f"{self._base_url}/message"
+        payload: dict = {"message": message, "phoneNumbers": [to]}
+        if self._device_id:
+            payload["deviceId"] = self._device_id
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(url, json=payload, headers=headers)
+            async with httpx.AsyncClient(timeout=10.0, auth=self._auth) as client:
+                response = await client.post(url, json=payload)
                 response.raise_for_status()
                 data = response.json()
                 return SMSSendResult(success=True, provider_message_id=data.get("id"))

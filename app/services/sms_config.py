@@ -12,12 +12,13 @@ from app.services.audit import log_action
 
 
 def _to_out(org: Organization) -> SmsConfigOut:
-    api_key = decrypt_secret(org.sms_api_key_encrypted) if org.sms_api_key_encrypted else None
+    password = decrypt_secret(org.sms_password_encrypted) if org.sms_password_encrypted else None
     return SmsConfigOut(
         enabled=org.sms_enabled,
         base_url=org.sms_base_url,
-        sender_id=org.sms_sender_id,
-        api_key_masked=mask_secret(api_key) if api_key else None,
+        username=org.sms_username,
+        device_id=org.sms_device_id,
+        password_masked=mask_secret(password) if password else None,
         last_tested_at=org.sms_last_tested_at,
         last_test_status=org.sms_last_test_status,
         last_test_error=org.sms_last_test_error,
@@ -33,14 +34,16 @@ async def update_sms_config(
 
     if payload.base_url is not None:
         org.sms_base_url = payload.base_url or None
-    if payload.api_key is not None:
+    if payload.username is not None:
+        org.sms_username = payload.username or None
+    if payload.password is not None:
         # A non-empty value replaces the stored secret; the API never
         # receives the existing plaintext back to "not change" it, so an
         # empty string is used to explicitly leave it untouched — enforced
         # by min_length=1 on the schema field when supplied at all.
-        org.sms_api_key_encrypted = encrypt_secret(payload.api_key)
-    if payload.sender_id is not None:
-        org.sms_sender_id = payload.sender_id or None
+        org.sms_password_encrypted = encrypt_secret(payload.password)
+    if payload.device_id is not None:
+        org.sms_device_id = payload.device_id or None
     if payload.enabled is not None:
         org.sms_enabled = payload.enabled
 
